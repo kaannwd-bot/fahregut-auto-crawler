@@ -1,0 +1,13 @@
+{
+  "name": "fahregut-auto-crawler",
+  "version": "1.0.0",
+  "description": "Live Kleinanzeigen Auto-Scraper für Fahregut.de",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "puppeteer": "^21.5.0"
+  }
+}
