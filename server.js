@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft jetzt stabil (Chromium Fix aktiv)");
+  res.send("🚗 Fahregut Auto-Crawler läuft stabil ✅");
 });
 
 app.get("/crawl", async (req, res) => {
@@ -17,23 +17,39 @@ app.get("/crawl", async (req, res) => {
   const query = [marke, modell].filter(Boolean).join(" ");
   const searchUrl = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0`;
 
+  console.log("=======================================================");
+  console.log(`🔍 Anfrage: ${searchUrl}`);
+
   try {
-    console.log("⏳ Starte Chromium...");
+    console.log("⏳ Warte 3 Sekunden, bevor Chromium gestartet wird...");
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const executablePath = await chromium.executablePath();
+
+    console.log("🚀 Starte Chromium mit Pfad:", executablePath || "[DEFAULT]");
     const browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--single-process",
+        "--no-zygote",
+        "--disable-gpu"
+      ],
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: true, // Erzwinge echten Headless Mode
+      executablePath,
+      headless: true,
       ignoreHTTPSErrors: true,
-      protocolTimeout: 90000,
+      protocolTimeout: 120000
     });
 
     const page = await browser.newPage();
-    console.log(`🌐 Lade ${searchUrl}`);
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
+    console.log("🌍 Lade Seite:", searchUrl);
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
 
     const cars = await page.evaluate(() => {
-      const arr = [];
+      const results = [];
       document.querySelectorAll("article").forEach((el) => {
         const title = el.querySelector("a h2")?.innerText || "";
         const price = el.querySelector(".price")?.innerText || "";
@@ -44,21 +60,23 @@ app.get("/crawl", async (req, res) => {
         const url = el.querySelector("a")?.getAttribute("href")
           ? "https://www.kleinanzeigen.de" + el.querySelector("a").getAttribute("href")
           : "";
-        if (title && url) arr.push({ title, price, location, details, image, url });
+        if (title && url) results.push({ title, price, location, details, image, url });
       });
-      return arr.slice(0, 10);
+      return results.slice(0, 10);
     });
 
+    console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
     await browser.close();
-    console.log(`✅ Erfolgreich ${cars.length} Anzeigen gefunden!`);
     res.json(cars);
   } catch (err) {
-    console.error("❌ Fehler:", err.message);
+    console.error("❌ FEHLER:", err.message);
     res.status(500).json({
-      error: "Crawler konnte Seite nicht laden.",
-      reason: err.message,
+      error: "Crawler konnte nicht ausgeführt werden.",
+      reason: err.message
     });
   }
 });
 
-app.listen(PORT, () => console.log(`✅ Crawler läuft auf Port ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`✅ Fahregut-Crawler läuft auf Port ${PORT}`)
+);
