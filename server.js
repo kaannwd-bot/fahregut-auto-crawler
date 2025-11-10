@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft stabil ✅ (v2 mit JS-Render)");
+  res.send("🚗 Fahregut Auto-Crawler läuft stabil ✅ (Render async fix)");
 });
 
 app.get("/crawl", async (req, res) => {
@@ -20,12 +20,13 @@ app.get("/crawl", async (req, res) => {
   console.log("=======================================================");
   console.log(`🔍 Anfrage: ${searchUrl}`);
 
-  try {
-    console.log("⏳ Warte 3 Sekunden, bevor Chromium gestartet wird...");
-    await new Promise((r) => setTimeout(r, 3000));
+  // 👉 Sofortige Antwort an Browser, damit Render keinen 502 gibt
+  res.status(202).json({ status: "Crawler gestartet", query: query || "alle Fahrzeuge" });
 
+  // ---- Rest läuft im Hintergrund ----
+  try {
+    await new Promise((r) => setTimeout(r, 3000));
     const executablePath = await chromium.executablePath();
-    console.log("🚀 Starte Chromium mit Pfad:", executablePath || "[DEFAULT]");
 
     const browser = await puppeteer.launch({
       args: [
@@ -33,9 +34,9 @@ app.get("/crawl", async (req, res) => {
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
+        "--disable-gpu",
         "--single-process",
         "--no-zygote",
-        "--disable-gpu",
       ],
       defaultViewport: chromium.defaultViewport,
       executablePath,
@@ -48,25 +49,18 @@ app.get("/crawl", async (req, res) => {
     console.log("🌍 Lade Seite:", searchUrl);
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
 
-    // 👇 Auto-Scroll für Lazy Loading
     await autoScroll(page);
-
-    // 👇 Warten bis Anzeigen sichtbar sind
-    console.log("🕒 Warte bis JS-Anzeigen sichtbar sind...");
-    await page.waitForSelector("article a h2, .aditem, [data-testid='list-item']", { timeout: 25000 }).catch(() => {
-      console.warn("⚠️ Keine JS-Anzeigen-Elemente gefunden (Timeout).");
-    });
+    console.log("🕒 Warte bis Anzeigen sichtbar sind...");
+    await page.waitForSelector("article, .aditem, [data-testid='list-item']", { timeout: 25000 });
 
     const cars = await page.evaluate(() => {
       const arr = [];
       document.querySelectorAll("article, .aditem, [data-testid='list-item']").forEach((el) => {
         const title = el.querySelector("a h2, h2")?.innerText || "";
         const price = el.querySelector(".price, [data-testid='ad-price']")?.innerText || "";
-        const location =
-          el.querySelector(".aditem-main--top--left, [data-testid='location-date']")?.innerText || "";
+        const location = el.querySelector(".aditem-main--top--left, [data-testid='location-date']")?.innerText || "";
         const details = el.querySelector(".aditem-main--middle, [data-testid='labels']")?.innerText || "";
-        const image =
-          el.querySelector("img")?.src || "https://via.placeholder.com/400x250?text=Auto";
+        const image = el.querySelector("img")?.src || "https://via.placeholder.com/400x250?text=Auto";
         const url = el.querySelector("a")?.href || "";
         if (title && url) arr.push({ title, price, location, details, image, url });
       });
@@ -75,17 +69,12 @@ app.get("/crawl", async (req, res) => {
 
     console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
     await browser.close();
-    res.json(cars);
+
   } catch (err) {
-    console.error("❌ FEHLER:", err.message);
-    res.status(500).json({
-      error: "Crawler konnte nicht ausgeführt werden.",
-      reason: err.message,
-    });
+    console.error("❌ Hintergrund-Fehler:", err.message);
   }
 });
 
-// 🔄 Auto-Scroll-Funktion (lädt Lazy-Content nach)
 async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
