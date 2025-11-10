@@ -14,6 +14,7 @@ app.get("/", (req, res) => {
 
 app.get("/crawl", async (req, res) => {
   try {
+    // Puppeteer NUR HIER starten (nicht beim Serverstart)
     const browser = await puppeteer.launch({
       headless: true,
       executablePath: chromium.path,
