@@ -1,6 +1,6 @@
 import express from "express";
 import puppeteer from "puppeteer-core";
-import chromium from "@sparticuz/chromium"; // 🧩 bessere Version für Serverumgebungen
+import chromium from "@sparticuz/chromium";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,7 +32,9 @@ app.get("/crawl", async (req, res) => {
         const location = el.querySelector(".aditem-main--top--left")?.innerText || "";
         const details = el.querySelector(".aditem-main--middle")?.innerText || "";
         const image = el.querySelector("img")?.src || "https://via.placeholder.com/400x250?text=Auto";
-        const url = el.querySelector("a")?.href ? "https://www.kleinanzeigen.de" + el.querySelector("a").getAttribute("href") : "";
+        const url = el.querySelector("a")?.href
+          ? "https://www.kleinanzeigen.de" + el.querySelector("a").getAttribute("href")
+          : "";
         if (title && url) results.push({ title, price, location, details, image, url });
       });
       return results.slice(0, 10);
