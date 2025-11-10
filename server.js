@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 
@@ -7,11 +8,13 @@ chromium.setGraphicsMode = false;
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+const OUTPUT_PATH = "/tmp/output.json"; // Render erlaubt nur /tmp als Schreibpfad
 
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft stabil ✅ (Render async fix)");
+  res.send("🚗 Fahregut Auto-Crawler läuft stabil ✅ (mit Datenspeicherung)");
 });
 
+// ✅ Crawler starten (asynchron)
 app.get("/crawl", async (req, res) => {
   const { marke = "", modell = "" } = req.query;
   const query = [marke, modell].filter(Boolean).join(" ");
@@ -20,10 +23,9 @@ app.get("/crawl", async (req, res) => {
   console.log("=======================================================");
   console.log(`🔍 Anfrage: ${searchUrl}`);
 
-  // 👉 Sofortige Antwort an Browser, damit Render keinen 502 gibt
+  // Sofortige Antwort an Render, damit kein 502 auftritt
   res.status(202).json({ status: "Crawler gestartet", query: query || "alle Fahrzeuge" });
 
-  // ---- Rest läuft im Hintergrund ----
   try {
     await new Promise((r) => setTimeout(r, 3000));
     const executablePath = await chromium.executablePath();
@@ -64,17 +66,31 @@ app.get("/crawl", async (req, res) => {
         const url = el.querySelector("a")?.href || "";
         if (title && url) arr.push({ title, price, location, details, image, url });
       });
-      return arr.slice(0, 10);
+      return arr.slice(0, 15);
     });
 
-    console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
     await browser.close();
+    console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
 
+    // 🔹 Speichere Ergebnisse in JSON-Datei
+    fs.writeFileSync(OUTPUT_PATH, JSON.stringify(cars, null, 2));
+    console.log("💾 Ergebnisse gespeichert unter:", OUTPUT_PATH);
   } catch (err) {
     console.error("❌ Hintergrund-Fehler:", err.message);
   }
 });
 
+// ✅ Ergebnisse abrufen
+app.get("/results", (req, res) => {
+  if (fs.existsSync(OUTPUT_PATH)) {
+    const data = fs.readFileSync(OUTPUT_PATH, "utf8");
+    res.type("application/json").send(data);
+  } else {
+    res.status(404).json({ error: "Keine Ergebnisse vorhanden." });
+  }
+});
+
+// 🔄 Scroll-Funktion
 async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
