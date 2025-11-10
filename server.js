@@ -23,11 +23,13 @@ app.get("/crawl", async (req, res) => {
   console.log("=======================================================");
   console.log(`🔍 Anfrage: ${searchUrl}`);
 
-  // Sofortige Antwort an Render, damit kein 502 auftritt
+  // Sofortige Antwort an Render, damit kein 502-Fehler kommt
   res.status(202).json({ status: "Crawler gestartet", query: query || "alle Fahrzeuge" });
 
   try {
-    await new Promise((r) => setTimeout(r, 3000));
+    console.log("🕒 Warte kurz, bis Chromium bereit ist...");
+    await new Promise((r) => setTimeout(r, 4000));
+
     const executablePath = await chromium.executablePath();
 
     const browser = await puppeteer.launch({
@@ -40,41 +42,58 @@ app.get("/crawl", async (req, res) => {
         "--single-process",
         "--no-zygote",
       ],
-      defaultViewport: chromium.defaultViewport,
+      defaultViewport: { width: 1280, height: 900 },
       executablePath,
-      headless: true,
+      headless: true, // auf Render muss es true bleiben
       ignoreHTTPSErrors: true,
       protocolTimeout: 180000,
     });
 
     const page = await browser.newPage();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    );
+
     console.log("🌍 Lade Seite:", searchUrl);
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
 
+    // ✅ Cookie-Banner automatisch wegklicken
+    try {
+      await page.waitForSelector("button[aria-label*='Alle akzeptieren']", { timeout: 8000 });
+      await page.click("button[aria-label*='Alle akzeptieren']");
+      console.log("✅ Cookies akzeptiert");
+    } catch {
+      console.log("⚠️ Kein Cookie-Banner gefunden oder übersprungen");
+    }
+
+    // Scrollen, damit alle Anzeigen geladen werden
     await autoScroll(page);
-    console.log("🕒 Warte bis Anzeigen sichtbar sind...");
-    await page.waitForSelector("article, .aditem, [data-testid='list-item']", { timeout: 25000 });
+
+    console.log("🕒 Warte, bis Anzeigen sichtbar sind...");
+    await page.waitForSelector("article[data-testid='listing-ad']", { timeout: 30000 });
 
     const cars = await page.evaluate(() => {
-      const arr = [];
-      document.querySelectorAll("article, .aditem, [data-testid='list-item']").forEach((el) => {
-        const title = el.querySelector("a h2, h2")?.innerText || "";
-        const price = el.querySelector(".price, [data-testid='ad-price']")?.innerText || "";
-        const location = el.querySelector(".aditem-main--top--left, [data-testid='location-date']")?.innerText || "";
-        const details = el.querySelector(".aditem-main--middle, [data-testid='labels']")?.innerText || "";
+      const results = [];
+      document.querySelectorAll("article[data-testid='listing-ad']").forEach((el) => {
+        const title = el.querySelector("h2")?.innerText || "";
+        const price = el.querySelector("[data-testid='ad-price']")?.innerText || "";
+        const location = el.querySelector("[data-testid='location-date']")?.innerText || "";
         const image = el.querySelector("img")?.src || "https://via.placeholder.com/400x250?text=Auto";
-        const url = el.querySelector("a")?.href || "";
-        if (title && url) arr.push({ title, price, location, details, image, url });
+        const link = el.querySelector("a")?.href || "";
+        if (title && link) results.push({ title, price, location, image, link });
       });
-      return arr.slice(0, 15);
+      return results;
     });
 
     await browser.close();
-    console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
 
-    // 🔹 Speichere Ergebnisse in JSON-Datei
-    fs.writeFileSync(OUTPUT_PATH, JSON.stringify(cars, null, 2));
-    console.log("💾 Ergebnisse gespeichert unter:", OUTPUT_PATH);
+    console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
+    if (cars.length > 0) {
+      fs.writeFileSync(OUTPUT_PATH, JSON.stringify(cars, null, 2));
+      console.log("💾 Ergebnisse gespeichert unter:", OUTPUT_PATH);
+    } else {
+      console.log("⚠️ Keine Fahrzeuge gefunden.");
+    }
   } catch (err) {
     console.error("❌ Hintergrund-Fehler:", err.message);
   }
