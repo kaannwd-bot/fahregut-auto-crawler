@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft!");
+  res.send("🚗 Fahregut Auto-Crawler läuft stabil!");
 });
 
 app.get("/crawl", async (req, res) => {
@@ -18,50 +18,48 @@ app.get("/crawl", async (req, res) => {
   const searchUrl = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0`;
 
   try {
-    console.log("⏳ Warte kurz, bis Chromium bereit ist...");
-    await new Promise((resolve) => setTimeout(resolve, 3000)); // Warte 3 Sekunden
+    console.log("⏳ Starte stabilen Chromium-Start...");
+    await new Promise((resolve) => setTimeout(resolve, 5000)); // längeres Warten (5s)
 
-    let browser;
     const executablePath = (await chromium.executablePath()) || "/usr/bin/google-chrome-stable";
 
-    try {
-      console.log("🚀 Starte Chrome...");
-      browser = await puppeteer.launch({
-        args: [
-          ...chromium.args,
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--no-zygote",
-        ],
-        defaultViewport: chromium.defaultViewport,
-        executablePath,
-        headless: chromium.headless,
-      });
-    } catch (err) {
-      console.error("⚠️ Erster Start fehlgeschlagen:", err.message);
-      console.log("🔁 Neuer Versuch in 3 Sekunden...");
-      await new Promise((r) => setTimeout(r, 3000));
+    let browser;
+    let attempt = 0;
+    let success = false;
 
-      browser = await puppeteer.launch({
-        args: [
-          ...chromium.args,
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--no-zygote",
-        ],
-        defaultViewport: chromium.defaultViewport,
-        executablePath,
-        headless: chromium.headless,
-      });
+    while (!success && attempt < 3) {
+      try {
+        attempt++;
+        console.log(`🚀 Starte Chrome (Versuch ${attempt})...`);
+        browser = await puppeteer.launch({
+          args: [
+            ...chromium.args,
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-zygote",
+          ],
+          defaultViewport: chromium.defaultViewport,
+          executablePath,
+          headless: chromium.headless,
+          protocolTimeout: 120000, // 2 Minuten Timeout
+        });
+        success = true;
+      } catch (err) {
+        console.error(`⚠️ Chrome-Start fehlgeschlagen (${attempt}):`, err.message);
+        if (attempt < 3) {
+          console.log("🔁 Neuer Versuch in 5 Sekunden...");
+          await new Promise((r) => setTimeout(r, 5000));
+        }
+      }
     }
+
+    if (!success) throw new Error("Chromium konnte nach 3 Versuchen nicht gestartet werden.");
 
     const page = await browser.newPage();
     console.log(`🌐 Lade ${searchUrl} ...`);
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
 
     const cars = await page.evaluate(() => {
       const arr = [];
@@ -84,8 +82,11 @@ app.get("/crawl", async (req, res) => {
     console.log(`✅ Erfolgreich ${cars.length} Autos gefunden!`);
     res.json(cars);
   } catch (err) {
-    console.error("❌ Crawler-Fehler:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Crawler-Fehler:", err.message);
+    res.status(500).json({
+      error: "Crawler ist gerade nicht erreichbar – bitte später erneut versuchen.",
+      reason: err.message,
+    });
   }
 });
 
