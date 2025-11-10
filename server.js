@@ -25,8 +25,8 @@ app.get("/crawl", async (req, res) => {
     await new Promise((r) => setTimeout(r, 3000));
 
     const executablePath = await chromium.executablePath();
-
     console.log("🚀 Starte Chromium mit Pfad:", executablePath || "[DEFAULT]");
+
     const browser = await puppeteer.launch({
       args: [
         ...chromium.args,
@@ -35,21 +35,27 @@ app.get("/crawl", async (req, res) => {
         "--disable-dev-shm-usage",
         "--single-process",
         "--no-zygote",
-        "--disable-gpu"
+        "--disable-gpu",
       ],
       defaultViewport: chromium.defaultViewport,
       executablePath,
       headless: true,
       ignoreHTTPSErrors: true,
-      protocolTimeout: 120000
+      protocolTimeout: 120000,
     });
 
     const page = await browser.newPage();
     console.log("🌍 Lade Seite:", searchUrl);
     await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
 
+    // 👇 Warten bis die Artikel geladen sind
+    console.log("🕒 Warte bis Anzeigen sichtbar sind...");
+    await page.waitForSelector("article a h2", { timeout: 15000 }).catch(() => {
+      console.warn("⚠️ Keine Anzeigen-Elemente gefunden (Timeout).");
+    });
+
     const cars = await page.evaluate(() => {
-      const results = [];
+      const arr = [];
       document.querySelectorAll("article").forEach((el) => {
         const title = el.querySelector("a h2")?.innerText || "";
         const price = el.querySelector(".price")?.innerText || "";
@@ -60,9 +66,9 @@ app.get("/crawl", async (req, res) => {
         const url = el.querySelector("a")?.getAttribute("href")
           ? "https://www.kleinanzeigen.de" + el.querySelector("a").getAttribute("href")
           : "";
-        if (title && url) results.push({ title, price, location, details, image, url });
+        if (title && url) arr.push({ title, price, location, details, image, url });
       });
-      return results.slice(0, 10);
+      return arr.slice(0, 10);
     });
 
     console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
@@ -72,11 +78,9 @@ app.get("/crawl", async (req, res) => {
     console.error("❌ FEHLER:", err.message);
     res.status(500).json({
       error: "Crawler konnte nicht ausgeführt werden.",
-      reason: err.message
+      reason: err.message,
     });
   }
 });
 
-app.listen(PORT, () =>
-  console.log(`✅ Fahregut-Crawler läuft auf Port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`✅ Fahregut-Crawler läuft auf Port ${PORT}`));
