@@ -3,7 +3,7 @@ import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
   res.send("🚗 Fahregut Auto-Crawler läuft!");
@@ -15,17 +15,19 @@ app.get("/crawl", async (req, res) => {
   const searchUrl = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0`;
 
   try {
+    console.log("🚀 Starte Chrome...");
     const browser = await puppeteer.launch({
-      headless: true,
-      executablePath: await chromium.executablePath(),
       args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded" });
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     const cars = await page.evaluate(() => {
-      const results = [];
+      const arr = [];
       document.querySelectorAll("article").forEach(el => {
         const title = el.querySelector("a h2")?.innerText || "";
         const price = el.querySelector(".price")?.innerText || "";
@@ -35,16 +37,17 @@ app.get("/crawl", async (req, res) => {
         const url = el.querySelector("a")?.href
           ? "https://www.kleinanzeigen.de" + el.querySelector("a").getAttribute("href")
           : "";
-        if (title && url) results.push({ title, price, location, details, image, url });
+        if (title && url) arr.push({ title, price, location, details, image, url });
       });
-      return results.slice(0, 10);
+      return arr.slice(0, 10);
     });
 
     await browser.close();
+    console.log("✅ Erfolgreich gecrawlt!");
     res.json(cars);
   } catch (err) {
     console.error("❌ Crawler-Fehler:", err);
-    res.status(500).json({ error: "Crawler crash: " + err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
