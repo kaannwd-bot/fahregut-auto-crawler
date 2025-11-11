@@ -8,35 +8,22 @@ chromium.setGraphicsMode = false;
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+let lastResults = []; // Zwischenspeicher für letzte Inserate
+let newCars = []; // Neu erkannte Fahrzeuge
+
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 6.4 – Fly.io Fix + Schnellmodus ✅)");
+  res.send("🚗 Fahregut Auto-Crawler läuft (Version 6.5 – Realtime Live ✅)");
 });
 
-// ✅ Crawl-Route – liefert direkt JSON zurück
+// 🔄 Realtime-Endpoint – gibt nur NEUE Inserate zurück
+app.get("/live", (req, res) => {
+  res.json(newCars);
+});
+
+// ✅ Standard-Endpunkt: einmaliger Crawl
 app.get("/crawl", async (req, res) => {
-  const { marke = "", modell = "" } = req.query;
-  const query = [marke, modell].filter(Boolean).join(" ");
-  const searchUrl =
-    query.trim().length > 0
-      ? `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0`
-      : "https://www.kleinanzeigen.de/s-autos/c216";
-
-  console.log(`🔍 Suche gestartet: ${searchUrl}`);
-
   try {
-    const cars = await Promise.race([
-      crawlKleinanzeigen(searchUrl),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout – zu lange Antwortzeit")), 90000)
-      ),
-    ]);
-
-    if (!cars || cars.length === 0) {
-      console.log("⚠️ Keine Fahrzeuge gefunden.");
-      return res.json([]);
-    }
-
-    console.log(`✅ ${cars.length} Fahrzeuge extrahiert`);
+    const cars = await crawlKleinanzeigen("https://www.kleinanzeigen.de/s-autos/c216");
     res.json(cars);
   } catch (err) {
     console.error("❌ Fehler beim Crawlen:", err.message);
@@ -44,15 +31,15 @@ app.get("/crawl", async (req, res) => {
   }
 });
 
-// 🔧 Haupt-Crawler-Funktion
+// 🔧 Crawl-Funktion (mit Fly.io-kompatiblem Chromium)
 async function crawlKleinanzeigen(url) {
-  console.log("🕒 Starte Browser...");
+  console.log("🌍 Lade Seite:", url);
 
   let executablePath;
   try {
     executablePath = await chromium.executablePath();
-  } catch (err) {
-    console.warn("⚠️ Chromium executablePath Fehler – verwende Fallback.");
+  } catch (e) {
+    console.warn("⚠️ Chromium executablePath Fehler, Fallback wird genutzt");
     executablePath = "/usr/bin/chromium-browser";
   }
 
@@ -68,15 +55,12 @@ async function crawlKleinanzeigen(url) {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
   );
 
-  console.log("🌍 Lade Seite:", url);
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-  // ✅ Schneller Cookie-Klick (wenn sichtbar)
   try {
     await page.click("button[aria-label*='Alle akzeptieren']", { delay: 200 });
   } catch {}
 
-  // 🔎 Fahrzeuge lesen
   const cars = await page.evaluate(() => {
     const arr = [];
     document.querySelectorAll("article[data-testid='listing-ad']").forEach((el) => {
@@ -91,7 +75,33 @@ async function crawlKleinanzeigen(url) {
   });
 
   await browser.close();
+  console.log(`✅ ${cars.length} Fahrzeuge gefunden`);
   return cars;
 }
 
-app.listen(PORT, () => console.log(`✅ Server läuft auf Port ${PORT}`));
+// 🧠 Hintergrundprozess: alle 10 Sekunden nach neuen Inseraten suchen
+async function startRealtimeCrawl() {
+  try {
+    const cars = await crawlKleinanzeigen("https://www.kleinanzeigen.de/s-autos/c216");
+
+    // Nur neue Fahrzeuge ermitteln (nach URL)
+    const fresh = cars.filter((c) => !lastResults.some((old) => old.url === c.url));
+
+    if (fresh.length > 0) {
+      console.log(`🆕 ${fresh.length} neue Fahrzeuge gefunden!`);
+      newCars = fresh;
+      lastResults = cars;
+    } else {
+      console.log("⏳ Keine neuen Fahrzeuge.");
+    }
+  } catch (err) {
+    console.error("⚠️ Realtime-Fehler:", err.message);
+  }
+
+  setTimeout(startRealtimeCrawl, 10000); // 10 Sekunden Zyklus
+}
+
+// 🔁 Starte den Live-Loop
+startRealtimeCrawl();
+
+app.listen(PORT, () => console.log(`✅ Server läuft auf Port ${PORT} (Realtime aktiv)`));
