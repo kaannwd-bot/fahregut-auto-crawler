@@ -1,102 +1,101 @@
+// 🚗 Fahregut Auto-Crawler – Version 6.8 (Realtime & Neueste Inserate ✅)
+// Fly.io + Puppeteer-Core + Chromium Integration
+
 import express from "express";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
+import cors from "cors";
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 8080;
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH || chromium.executablePath;
 
 chromium.setHeadlessMode = true;
 chromium.setGraphicsMode = false;
 
-const app = express();
-const PORT = process.env.PORT || 8080;
+// 🧠 Zwischenspeicher für neue Anzeigen
+let latestAds = [];
+let lastUpdate = 0;
 
-app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 6.7 – Chromium Fix Fly.io ✅)");
-});
+// 🚀 Hauptfunktion: Anzeigen abrufen
+async function fetchAds(query = "") {
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await CHROMIUM_PATH(),
+    headless: chromium.headless,
+  });
 
-app.get("/crawl", async (req, res) => {
-  const { marke = "", modell = "" } = req.query;
-  const query = [marke, modell].filter(Boolean).join(" ");
-  const searchUrl = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0`;
+  const page = await browser.newPage();
+  const url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
+    query
+  )}/k0?sorting=date-desc`;
 
-  console.log("=======================================================");
-  console.log(`🔍 Anfrage: ${searchUrl}`);
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
+  const ads = await page.$$eval("article.aditem", (items) =>
+    items.slice(0, 15).map((item) => {
+      const title = item.querySelector(".aditem-main--middle--title")?.innerText.trim();
+      const price = item.querySelector(".aditem-main--middle--price-shipping--price")?.innerText.trim();
+      const location = item.querySelector(".aditem-main--top--left")?.innerText.trim();
+      const image = item.querySelector("img")?.src || "";
+      const url = item.querySelector("a")?.href || "";
+      const details = item.querySelector(".aditem-main--middle--description")?.innerText.trim();
+      return { title, price, location, image, url, details };
+    })
+  );
+
+  await browser.close();
+  return ads;
+}
+
+// 🔁 Automatische Realtime-Aktualisierung alle 10 Sekunden
+async function updateAds() {
+  const now = Date.now();
+  if (now - lastUpdate < 10000) return; // alle 10 Sek.
+
+  console.log("🔄 Suche nach neuesten Anzeigen...");
   try {
-    const cars = await crawlKleinanzeigen(searchUrl);
-    res.json(cars);
+    const newAds = await fetchAds("");
+    const diff = newAds.filter(
+      (a) => !latestAds.some((old) => old.url === a.url)
+    );
+
+    if (diff.length > 0) {
+      console.log(`🆕 ${diff.length} neue Anzeigen gefunden!`);
+      latestAds = [...diff, ...latestAds].slice(0, 30);
+    } else {
+      console.log("ℹ️ Keine neuen Anzeigen.");
+    }
+
+    lastUpdate = now;
   } catch (err) {
-    console.error("❌ Fehler beim Crawlen:", err.message);
+    console.error("⚠️ Crawler-Fehler:", err.message);
+  }
+}
+
+// 🌍 API-Route / Crawl – liefert nur neueste Anzeigen
+app.get("/crawl", async (req, res) => {
+  try {
+    if (latestAds.length === 0) {
+      await updateAds();
+    }
+    res.json(latestAds);
+  } catch (err) {
     res.status(500).json({ error: "Crawler-Fehler", details: err.message });
   }
 });
 
-// 🔧 Haupt-Crawler-Funktion
-async function crawlKleinanzeigen(searchUrl) {
-  console.log("🕒 Starte Puppeteer (Fly.io-kompatibel mit festem Pfad)...");
+// 💓 Healthcheck
+app.get("/health", (req, res) => {
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 6.8 – Realtime OK)");
+});
 
-  const executablePath =
-    process.env.CHROMIUM_PATH ||
-    "/usr/bin/chromium" ||
-    "/usr/bin/chromium-browser";
+// 🕒 Intervall alle 10 Sekunden
+setInterval(updateAds, 10000);
 
-  console.log("➡️ Verwende Browser-Pfad:", executablePath);
-
-  const browser = await puppeteer.launch({
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-zygote",
-      "--single-process",
-      "--disable-infobars",
-      "--window-size=1280,800",
-    ],
-    executablePath,
-    headless: true,
-    ignoreHTTPSErrors: true,
-    defaultViewport: { width: 1280, height: 800 },
-  });
-
-  const page = await browser.newPage();
-  await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 60000 });
-
-  await autoScroll(page);
-  const cars = await page.evaluate(() => {
-    const arr = [];
-    document.querySelectorAll("article[data-testid='listing-ad']").forEach((el) => {
-      const title = el.querySelector("h2")?.innerText || "";
-      const price = el.querySelector("[data-testid='ad-price']")?.innerText || "";
-      const location = el.querySelector("[data-testid='location-date']")?.innerText || "";
-      const image = el.querySelector("img")?.src || "";
-      const url = el.querySelector("a")?.href || "";
-      if (title && url) arr.push({ title, price, location, image, url });
-    });
-    return arr;
-  });
-
-  await browser.close();
-  console.log(`💾 ${cars.length} Fahrzeuge gefunden ✅`);
-  return cars;
-}
-
-async function autoScroll(page) {
-  await page.evaluate(async () => {
-    await new Promise((resolve) => {
-      let totalHeight = 0;
-      const distance = 400;
-      const timer = setInterval(() => {
-        const scrollHeight = document.body.scrollHeight;
-        window.scrollBy(0, distance);
-        totalHeight += distance;
-        if (totalHeight >= scrollHeight) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 300);
-    });
-  });
-}
-
-app.listen(PORT, () =>
-  console.log(`✅ Fahregut-Crawler läuft auf Port ${PORT}`)
-);
+// 🌐 Server starten
+app.listen(PORT, () => console.log(`🚗 Server läuft auf Port ${PORT}`));
