@@ -19,5 +19,5 @@ primary_region = "fra"
   cpus = 1
   memory = "1gb"
 
-[deploy]
-  release_command = "apt-get update && apt-get install -y chromium-browser"
+[build]
+  dockerfile = "Dockerfile"
