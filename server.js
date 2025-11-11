@@ -1,18 +1,18 @@
-// 🚗 Fahregut Auto-Crawler – Version 7.0 (Realtime Smart ✅)
+// 🚗 Fahregut Auto-Crawler – Version 7.1 (Realtime Smart Fix ✅)
 // Fly.io + Puppeteer-Core + Chromium Integration + Memory-Limit
 
 import express from "express";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import cors from "cors";
-import axios from "axios";
+import axios from "axios"; // ✅ normaler Import (kein await import mehr)
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
-const CHROMIUM_PATH = process.env.CHROMIUM_PATH || chromium.executablePath;
+const CHROMIUM_PATH = await chromium.executablePath; // ✅ direkt von chromium holen
 
 chromium.setHeadlessMode = true;
 chromium.setGraphicsMode = false;
@@ -28,7 +28,7 @@ async function fetchAds(query = "") {
   const browser = await puppeteer.launch({
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
-    executablePath: await CHROMIUM_PATH(),
+    executablePath: CHROMIUM_PATH,
     headless: chromium.headless,
   });
 
@@ -111,7 +111,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.0 – Realtime Smart ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.1 – Realtime Smart Fix ✅)");
 });
 
 // 🕒 Automatischer Realtime-Check alle 10 Sekunden
@@ -133,5 +133,5 @@ console.log("🕒 Live-Auto-Update aktiviert (Intervall 10 Sekunden, nur neue In
 
 // 🌐 Server starten
 app.listen(PORT, () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.0 (Realtime Smart)`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.1 (Realtime Smart Fix)`)
 );
