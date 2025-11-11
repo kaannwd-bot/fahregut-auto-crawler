@@ -1,16 +1,23 @@
 app = "fahregut-auto-crawler"
+primary_region = "fra"
 
 [env]
-  PORT = "8080"
+  PORT = "10000"  # muss mit server.js übereinstimmen
+  NODE_ENV = "production"
 
 [http_service]
-  internal_port = 8080
+  internal_port = 10000
   force_https = true
   auto_start_machines = true
   auto_stop_machines = false
   min_machines_running = 1
+  processes = ["app"]
 
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
   memory = "1gb"
+  memory_mb = 1024
+
+[build]
+  builder = "heroku/buildpacks:20"
