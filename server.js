@@ -8,11 +8,17 @@ chromium.setGraphicsMode = false;
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 6.2 – Fly.io Fix ✅)");
+// ✅ Healthcheck für Fly.io Proxy
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
 });
 
-// ✅ Haupt-Route
+// ✅ Root-Route
+app.get("/", (req, res) => {
+  res.send("🚗 Fahregut Auto-Crawler läuft (Version 6.3 – Fly.io stabil & HealthCheck ✅)");
+});
+
+// ✅ Crawl-Route – zeigt neueste Inserate
 app.get("/crawl", async (req, res) => {
   const url = "https://www.kleinanzeigen.de/s-autos/c216";
   console.log("🌍 Starte Crawl:", url);
@@ -32,7 +38,7 @@ app.get("/crawl", async (req, res) => {
   }
 });
 
-// 🔧 Crawler-Funktion (ultraleicht)
+// 🔧 Haupt-Crawler
 async function crawlKleinanzeigen(url) {
   console.log("🕒 Öffne Browser...");
 
@@ -42,13 +48,12 @@ async function crawlKleinanzeigen(url) {
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
+      "--disable-gpu",
       "--single-process",
       "--no-zygote",
-      "--disable-gpu",
     ],
     executablePath: await chromium.executablePath(),
     headless: true,
-    defaultViewport: { width: 1280, height: 800 },
   });
 
   const page = await browser.newPage();
@@ -56,11 +61,7 @@ async function crawlKleinanzeigen(url) {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
   );
 
-  try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-  } catch (e) {
-    console.log("⚠️ DOM geladen, aber evtl. unvollständig:", e.message);
-  }
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
 
   const cars = await page.evaluate(() => {
     const arr = [];
@@ -69,8 +70,8 @@ async function crawlKleinanzeigen(url) {
       const price = el.querySelector("[data-testid='ad-price']")?.innerText || "";
       const location = el.querySelector("[data-testid='location-date']")?.innerText || "";
       const image = el.querySelector("img")?.src || "";
-      const url = el.querySelector("a")?.href || "";
-      if (title && url) arr.push({ title, price, location, image, url });
+      const link = el.querySelector("a")?.href || "";
+      if (title && link) arr.push({ title, price, location, image, link });
     });
     return arr.slice(0, 25);
   });
