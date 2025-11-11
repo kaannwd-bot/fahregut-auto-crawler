@@ -6,54 +6,61 @@ chromium.setHeadlessMode = true;
 chromium.setGraphicsMode = false;
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 8080;
 
-// ✅ Healthcheck für Fly.io Proxy
-app.get("/health", (req, res) => {
-  res.status(200).send("OK");
-});
-
-// ✅ Root-Route
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 6.3 – Fly.io stabil & HealthCheck ✅)");
+  res.send("🚗 Fahregut Auto-Crawler läuft (Version 6.4 – Fly.io Fix + Schnellmodus ✅)");
 });
 
-// ✅ Crawl-Route – zeigt neueste Inserate
+// ✅ Crawl-Route – liefert direkt JSON zurück
 app.get("/crawl", async (req, res) => {
-  const url = "https://www.kleinanzeigen.de/s-autos/c216";
-  console.log("🌍 Starte Crawl:", url);
+  const { marke = "", modell = "" } = req.query;
+  const query = [marke, modell].filter(Boolean).join(" ");
+  const searchUrl =
+    query.trim().length > 0
+      ? `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0`
+      : "https://www.kleinanzeigen.de/s-autos/c216";
+
+  console.log(`🔍 Suche gestartet: ${searchUrl}`);
 
   try {
     const cars = await Promise.race([
-      crawlKleinanzeigen(url),
+      crawlKleinanzeigen(searchUrl),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout – Seite reagiert nicht")), 25000)
+        setTimeout(() => reject(new Error("Timeout – zu lange Antwortzeit")), 90000)
       ),
     ]);
 
+    if (!cars || cars.length === 0) {
+      console.log("⚠️ Keine Fahrzeuge gefunden.");
+      return res.json([]);
+    }
+
+    console.log(`✅ ${cars.length} Fahrzeuge extrahiert`);
     res.json(cars);
   } catch (err) {
-    console.error("❌ Fehler:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Fehler beim Crawlen:", err.message);
+    res.status(500).json({ error: "Crawler-Fehler", details: err.message });
   }
 });
 
-// 🔧 Haupt-Crawler
+// 🔧 Haupt-Crawler-Funktion
 async function crawlKleinanzeigen(url) {
-  console.log("🕒 Öffne Browser...");
+  console.log("🕒 Starte Browser...");
+
+  let executablePath;
+  try {
+    executablePath = await chromium.executablePath();
+  } catch (err) {
+    console.warn("⚠️ Chromium executablePath Fehler – verwende Fallback.");
+    executablePath = "/usr/bin/chromium-browser";
+  }
 
   const browser = await puppeteer.launch({
-    args: [
-      ...chromium.args,
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--single-process",
-      "--no-zygote",
-    ],
-    executablePath: await chromium.executablePath(),
-    headless: true,
+    args: [...chromium.args, "--no-sandbox", "--disable-dev-shm-usage"],
+    executablePath,
+    headless: chromium.headless,
+    defaultViewport: { width: 1280, height: 900 },
   });
 
   const page = await browser.newPage();
@@ -61,8 +68,15 @@ async function crawlKleinanzeigen(url) {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
   );
 
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+  console.log("🌍 Lade Seite:", url);
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
+  // ✅ Schneller Cookie-Klick (wenn sichtbar)
+  try {
+    await page.click("button[aria-label*='Alle akzeptieren']", { delay: 200 });
+  } catch {}
+
+  // 🔎 Fahrzeuge lesen
   const cars = await page.evaluate(() => {
     const arr = [];
     document.querySelectorAll("article[data-testid='listing-ad']").forEach((el) => {
@@ -70,17 +84,14 @@ async function crawlKleinanzeigen(url) {
       const price = el.querySelector("[data-testid='ad-price']")?.innerText || "";
       const location = el.querySelector("[data-testid='location-date']")?.innerText || "";
       const image = el.querySelector("img")?.src || "";
-      const link = el.querySelector("a")?.href || "";
-      if (title && link) arr.push({ title, price, location, image, link });
+      const url = el.querySelector("a")?.href || "";
+      if (title && url) arr.push({ title, price, location, image, url });
     });
-    return arr.slice(0, 25);
+    return arr;
   });
 
   await browser.close();
-  console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
   return cars;
 }
 
-app.listen(PORT, () =>
-  console.log(`✅ Fahregut Crawler läuft stabil auf Port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`✅ Server läuft auf Port ${PORT}`));
