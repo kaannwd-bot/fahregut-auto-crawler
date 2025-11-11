@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 5 – stabil mit Auto-Fallback & Timeout ✅)");
+  res.send("🚗 Fahregut Auto-Crawler läuft (Version 5.1 – Fly.io-kompatibel ✅)");
 });
 
 // ✅ Crawl-Route – liefert direkt JSON zurück
@@ -43,32 +43,34 @@ app.get("/crawl", async (req, res) => {
   }
 });
 
-// 🔧 Haupt-Crawler-Funktion (mit automatischem Fallback)
+// 🔧 Haupt-Crawler-Funktion (Fly.io optimiert)
 async function crawlKleinanzeigen(searchUrl) {
-  console.log("🕒 Starte Puppeteer...");
+  console.log("🕒 Starte Puppeteer (Fly.io kompatibel)...");
 
-  let browser;
+  let executablePath;
   try {
-    const executablePath = await chromium.executablePath();
-    browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
-      executablePath,
-      headless: chromium.headless,
-    });
-  } catch (err) {
-    console.error("⚠️ Sparticuz Chromium konnte nicht gestartet werden:", err.message);
-    console.log("🔁 Fallback: Standard-Puppeteer wird verwendet...");
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    executablePath = await chromium.executablePath();
+  } catch (e) {
+    console.warn("⚠️ Chromium-Pfad konnte nicht automatisch gefunden werden, benutze Standard-Path.");
+    executablePath = "/usr/bin/chromium-browser";
   }
+
+  const browser = await puppeteer.launch({
+    args: [
+      ...chromium.args,
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process",
+    ],
+    executablePath,
+    headless: chromium.headless,
+    ignoreHTTPSErrors: true,
+    protocolTimeout: 120000,
+    defaultViewport: { width: 1280, height: 900 },
+  });
 
   const page = await browser.newPage();
   await page.setUserAgent(
