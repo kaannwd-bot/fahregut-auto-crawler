@@ -1,24 +1,25 @@
-# Basis-Image mit Node.js 20
-FROM node:20-bullseye
+# Dockerfile für Fahregut Auto-Crawler v6.8 – Fly.io
 
-# Chromium installieren
+FROM node:18-slim
+
+# 🧠 System-Updates & Chromium installieren
 RUN apt-get update && \
     apt-get install -y chromium && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Arbeitsverzeichnis setzen
+# 🔧 Arbeitsverzeichnis
 WORKDIR /app
 
-# Projektdateien kopieren
-COPY . .
-
-# Abhängigkeiten installieren
+# 🔹 Dateien kopieren
+COPY package*.json ./
 RUN npm install
 
-# Standardumgebungsvariablen
-ENV PORT=8080
-ENV CHROMIUM_PATH=/usr/bin/chromium
-ENV NODE_ENV=production
+COPY . .
 
-# Server starten
+# 🌍 Umgebungsvariablen
+ENV PORT=8080
+ENV NODE_ENV=production
+ENV CHROMIUM_PATH=/usr/bin/chromium-browser
+
+# 🚀 App starten
 CMD ["node", "server.js"]
