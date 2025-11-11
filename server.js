@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 5.1 – Fly.io-kompatibel ✅)");
+  res.send("🚗 Fahregut Auto-Crawler läuft (Version 5.2 – Fly.io stabil & optimiert ✅)");
 });
 
 // ✅ Crawl-Route – liefert direkt JSON zurück
@@ -22,11 +22,11 @@ app.get("/crawl", async (req, res) => {
   console.log(`🔍 Anfrage: ${searchUrl}`);
 
   try {
-    // ⏱ Timeout-Schutz (max. 90 Sekunden)
+    // ⏱ Timeout-Schutz (max. 2,5 Minuten)
     const cars = await Promise.race([
       crawlKleinanzeigen(searchUrl),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout – Puppeteer zu lange beschäftigt")), 90000)
+        setTimeout(() => reject(new Error("Timeout – Puppeteer zu lange beschäftigt")), 150000)
       ),
     ]);
 
@@ -45,32 +45,43 @@ app.get("/crawl", async (req, res) => {
 
 // 🔧 Haupt-Crawler-Funktion (Fly.io optimiert)
 async function crawlKleinanzeigen(searchUrl) {
-  console.log("🕒 Starte Puppeteer (Fly.io kompatibel)...");
+  console.log("🕒 Starte Puppeteer (Fly.io-kompatibel)...");
 
-  let executablePath;
+  let browser;
   try {
-    executablePath = await chromium.executablePath();
-  } catch (e) {
-    console.warn("⚠️ Chromium-Pfad konnte nicht automatisch gefunden werden, benutze Standard-Path.");
-    executablePath = "/usr/bin/chromium-browser";
-  }
+    const executablePath = await chromium.executablePath();
 
-  const browser = await puppeteer.launch({
-    args: [
-      ...chromium.args,
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-zygote",
-      "--single-process",
-    ],
-    executablePath,
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-    protocolTimeout: 120000,
-    defaultViewport: { width: 1280, height: 900 },
-  });
+    browser = await puppeteer.launch({
+      args: [
+        ...chromium.args,
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
+        "--single-process",
+        "--disable-infobars",
+        "--window-size=1280,800",
+      ],
+      executablePath,
+      headless: true,
+      ignoreHTTPSErrors: true,
+      defaultViewport: { width: 1280, height: 800 },
+      protocolTimeout: 120000,
+    });
+  } catch (err) {
+    console.error("⚠️ Sparticuz Chromium konnte nicht gestartet werden:", err.message);
+    console.log("🔁 Fallback: Standard-Puppeteer wird verwendet...");
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
+  }
 
   const page = await browser.newPage();
   await page.setUserAgent(
@@ -117,7 +128,7 @@ async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
       let totalHeight = 0;
-      const distance = 500;
+      const distance = 400;
       const timer = setInterval(() => {
         const scrollHeight = document.body.scrollHeight;
         window.scrollBy(0, distance);
@@ -126,7 +137,7 @@ async function autoScroll(page) {
           clearInterval(timer);
           resolve();
         }
-      }, 400);
+      }, 350);
     });
   });
 }
