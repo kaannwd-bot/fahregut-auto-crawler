@@ -8,49 +8,54 @@ chromium.setGraphicsMode = false;
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// 🧠 Cache für letzte Inserate
+let lastResults = [];
+let lastRunTime = 0;
+
+// 🟢 Startseite
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 5.2 – Fly.io stabil & optimiert ✅)");
+  res.send("🚗 Fahregut Auto-Live-Crawler läuft (Version 6.0 – nur neue Inserate ✅)");
 });
 
-// ✅ Crawl-Route – liefert direkt JSON zurück
+// 🟡 API-Endpunkt: aktuelle Inserate zurückgeben
 app.get("/crawl", async (req, res) => {
-  const { marke = "", modell = "" } = req.query;
-  const query = [marke, modell].filter(Boolean).join(" ");
-  const searchUrl = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0`;
+  const now = Date.now();
 
-  console.log("=======================================================");
-  console.log(`🔍 Anfrage: ${searchUrl}`);
+  // ⏱ alle 10 Sekunden aktualisieren
+  if (now - lastRunTime < 10 * 1000 && lastResults.length > 0) {
+    console.log("⚡ Verwende gecachte Ergebnisse (unter 10 Sekunden alt)");
+    return res.json(lastResults);
+  }
 
   try {
-    // ⏱ Timeout-Schutz (max. 2,5 Minuten)
-    const cars = await Promise.race([
-      crawlKleinanzeigen(searchUrl),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Timeout – Puppeteer zu lange beschäftigt")), 150000)
-      ),
-    ]);
+    console.log("🌍 Lade neueste Autos...");
+    const cars = await crawlKleinanzeigen("https://www.kleinanzeigen.de/s-autos/c216");
 
+    // 🚫 Falls leer, alte Ergebnisse behalten
     if (!cars || cars.length === 0) {
-      console.log("⚠️ Keine Fahrzeuge gefunden.");
-      return res.json([]);
+      console.log("⚠️ Keine neuen Fahrzeuge gefunden.");
+      return res.json(lastResults);
     }
 
-    console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
-    res.json(cars);
+    // 💾 Cache aktualisieren
+    lastResults = cars.slice(0, 20); // nur die neuesten 20 behalten
+    lastRunTime = now;
+
+    console.log(`✅ ${lastResults.length} neue Fahrzeuge geladen.`);
+    res.json(lastResults);
   } catch (err) {
     console.error("❌ Fehler beim Crawlen:", err.message);
     res.status(500).json({ error: "Crawler-Fehler", details: err.message });
   }
 });
 
-// 🔧 Haupt-Crawler-Funktion (Fly.io optimiert)
-async function crawlKleinanzeigen(searchUrl) {
+// 🔧 Crawler-Funktion – holt nur die neuesten Fahrzeuge
+async function crawlKleinanzeigen(url) {
   console.log("🕒 Starte Puppeteer (Fly.io-kompatibel)...");
 
   let browser;
   try {
     const executablePath = await chromium.executablePath();
-
     browser = await puppeteer.launch({
       args: [
         ...chromium.args,
@@ -61,25 +66,18 @@ async function crawlKleinanzeigen(searchUrl) {
         "--no-zygote",
         "--single-process",
         "--disable-infobars",
-        "--window-size=1280,800",
       ],
       executablePath,
       headless: true,
       ignoreHTTPSErrors: true,
-      defaultViewport: { width: 1280, height: 800 },
-      protocolTimeout: 120000,
+      defaultViewport: { width: 1280, height: 900 },
     });
   } catch (err) {
     console.error("⚠️ Sparticuz Chromium konnte nicht gestartet werden:", err.message);
     console.log("🔁 Fallback: Standard-Puppeteer wird verwendet...");
     browser = await puppeteer.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
   }
 
@@ -88,23 +86,19 @@ async function crawlKleinanzeigen(searchUrl) {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
   );
 
-  console.log("🌍 Lade Seite:", searchUrl);
-  await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 120000 });
+  console.log("🌍 Öffne Seite:", url);
+  await page.goto(url, { waitUntil: "networkidle2", timeout: 90000 });
 
-  // ✅ Cookies akzeptieren (wenn vorhanden)
+  // ✅ Cookie-Banner akzeptieren
   try {
-    await page.waitForSelector("button[aria-label*='Alle akzeptieren']", { timeout: 8000 });
+    await page.waitForSelector("button[aria-label*='Alle akzeptieren']", { timeout: 5000 });
     await page.click("button[aria-label*='Alle akzeptieren']");
     console.log("✅ Cookies akzeptiert");
   } catch {
     console.log("⚠️ Kein Cookie-Banner sichtbar");
   }
 
-  // 🔄 Scrollen bis alles geladen ist
-  await autoScroll(page);
-  console.log("🔎 Lese Fahrzeugdaten...");
-
-  // ✅ Fahrzeugdaten extrahieren
+  console.log("🔎 Extrahiere neueste Fahrzeugdaten...");
   const cars = await page.evaluate(() => {
     const arr = [];
     document.querySelectorAll("article[data-testid='listing-ad'], article").forEach((el) => {
@@ -115,7 +109,9 @@ async function crawlKleinanzeigen(searchUrl) {
       const url = el.querySelector("a")?.href || "";
       if (title && url) arr.push({ title, price, location, image, url });
     });
-    return arr;
+
+    // 🔽 Neueste zuerst (Kleinanzeigen lädt meist in dieser Reihenfolge)
+    return arr.slice(0, 20);
   });
 
   await browser.close();
@@ -123,23 +119,4 @@ async function crawlKleinanzeigen(searchUrl) {
   return cars;
 }
 
-// 🔄 Scroll-Funktion
-async function autoScroll(page) {
-  await page.evaluate(async () => {
-    await new Promise((resolve) => {
-      let totalHeight = 0;
-      const distance = 400;
-      const timer = setInterval(() => {
-        const scrollHeight = document.body.scrollHeight;
-        window.scrollBy(0, distance);
-        totalHeight += distance;
-        if (totalHeight >= scrollHeight) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 350);
-    });
-  });
-}
-
-app.listen(PORT, () => console.log(`✅ Fahregut-Crawler läuft auf Port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Fahregut Live-Crawler läuft auf Port ${PORT}`));
