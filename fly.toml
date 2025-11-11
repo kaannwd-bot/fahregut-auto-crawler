@@ -4,7 +4,7 @@ primary_region = "fra"
 [env]
   PORT = "8080"
   NODE_ENV = "production"
-  CHROMIUM_PATH = "/usr/bin/chromium"
+  CHROMIUM_PATH = "/usr/bin/chromium-browser"
 
 [http_service]
   internal_port = 8080
