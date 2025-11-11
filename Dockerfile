@@ -1,9 +1,9 @@
-# 🚗 Fahregut Auto-Crawler – Fly.io Stable (Version 6.8)
+# 🚗 Fahregut Auto-Crawler – Fly.io Stable (Version 6.9)
 FROM node:18-slim
 
 # 🧰 Systempakete + Chromium installieren
 RUN apt-get update && \
-    apt-get install -y chromium-browser && \
+    apt-get install -y chromium && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 🔧 Arbeitsverzeichnis
@@ -19,10 +19,8 @@ COPY . .
 # 🌍 Umgebungsvariablen
 ENV PORT=8080
 ENV NODE_ENV=production
-ENV CHROMIUM_PATH=/usr/bin/chromium-browser
-
-# 🧠 Puppeteer Fix
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV CHROMIUM_PATH=/usr/bin/chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 # 🚀 App starten
