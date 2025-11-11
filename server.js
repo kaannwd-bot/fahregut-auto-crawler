@@ -99,3 +99,21 @@ setInterval(updateAds, 10000);
 
 // 🌐 Server starten
 app.listen(PORT, () => console.log(`🚗 Server läuft auf Port ${PORT}`));
+
+// 🔁 Auto-Refresh: ruft alle 10 Sekunden automatisch den Crawler auf
+const axios = await import("axios");
+
+async function autoUpdate() {
+  try {
+    const url = "https://fahregut-auto-crawler.fly.dev/crawl";
+    const res = await axios.default.get(url);
+    console.log("🔄 Live-Check:", res.data.length, "Anzeigen geladen");
+  } catch (err) {
+    console.log("⚠️ Auto-Update-Fehler:", err.message);
+  }
+}
+
+// alle 10 Sekunden automatisch starten
+setInterval(autoUpdate, 10000);
+console.log("🕒 Live-Auto-Update aktiviert (Intervall 10 Sekunden)");
+
