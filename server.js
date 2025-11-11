@@ -1,10 +1,11 @@
-// 🚗 Fahregut Auto-Crawler – Version 6.8 (Realtime & Neueste Inserate ✅)
-// Fly.io + Puppeteer-Core + Chromium Integration
+// 🚗 Fahregut Auto-Crawler – Version 7.0 (Realtime Smart ✅)
+// Fly.io + Puppeteer-Core + Chromium Integration + Memory-Limit
 
 import express from "express";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import cors from "cors";
+import axios from "axios";
 
 const app = express();
 app.use(cors());
@@ -16,9 +17,11 @@ const CHROMIUM_PATH = process.env.CHROMIUM_PATH || chromium.executablePath;
 chromium.setHeadlessMode = true;
 chromium.setGraphicsMode = false;
 
-// 🧠 Zwischenspeicher für neue Anzeigen
+// 🧠 Zwischenspeicher für Anzeigen
 let latestAds = [];
+let lastSeenUrls = new Map(); // url → timestamp
 let lastUpdate = 0;
+let isUpdating = false;
 
 // 🚀 Hauptfunktion: Anzeigen abrufen
 async function fetchAds(query = "") {
@@ -52,32 +55,49 @@ async function fetchAds(query = "") {
   return ads;
 }
 
-// 🔁 Automatische Realtime-Aktualisierung alle 10 Sekunden
+// 🔁 Realtime-Aktualisierung: nur neue Anzeigen
 async function updateAds() {
   const now = Date.now();
-  if (now - lastUpdate < 10000) return; // alle 10 Sek.
+  if (isUpdating || now - lastUpdate < 10000) return; // max. alle 10 Sek.
+  isUpdating = true;
 
   console.log("🔄 Suche nach neuesten Anzeigen...");
   try {
     const newAds = await fetchAds("");
-    const diff = newAds.filter(
-      (a) => !latestAds.some((old) => old.url === a.url)
-    );
 
-    if (diff.length > 0) {
-      console.log(`🆕 ${diff.length} neue Anzeigen gefunden!`);
-      latestAds = [...diff, ...latestAds].slice(0, 30);
+    // Neue URLs herausfiltern
+    const fresh = newAds.filter((a) => !lastSeenUrls.has(a.url));
+
+    if (fresh.length > 0) {
+      console.log(`🆕 ${fresh.length} neue Anzeigen gefunden!`);
+      fresh.slice(0, 5).forEach((a, i) =>
+        console.log(`  ${i + 1}. ${a.title} – ${a.price}`)
+      );
+
+      latestAds = [...fresh, ...latestAds].slice(0, 30);
+
+      // Zeitstempel speichern
+      fresh.forEach((a) => lastSeenUrls.set(a.url, now));
     } else {
-      console.log("ℹ️ Keine neuen Anzeigen.");
+      console.log("🟢 Keine neuen Inserate seit dem letzten Check.");
     }
 
+    // 🧹 Alte Einträge (> 12 Stunden) löschen
+    const cutoff = now - 12 * 60 * 60 * 1000;
+    for (const [url, ts] of lastSeenUrls.entries()) {
+      if (ts < cutoff) lastSeenUrls.delete(url);
+    }
+
+    console.log("💾 Bekannte Anzeigen im Speicher:", lastSeenUrls.size);
     lastUpdate = now;
   } catch (err) {
     console.error("⚠️ Crawler-Fehler:", err.message);
+  } finally {
+    isUpdating = false;
   }
 }
 
-// 🌍 API-Route / Crawl – liefert nur neueste Anzeigen
+// 🌍 API-Route /crawl – liefert nur neueste Anzeigen
 app.get("/crawl", async (req, res) => {
   try {
     if (latestAds.length === 0) {
@@ -91,29 +111,27 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 6.8 – Realtime OK)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.0 – Realtime Smart ✅)");
 });
 
-// 🕒 Intervall alle 10 Sekunden
+// 🕒 Automatischer Realtime-Check alle 10 Sekunden
 setInterval(updateAds, 10000);
 
-// 🌐 Server starten
-app.listen(PORT, () => console.log(`🚗 Server läuft auf Port ${PORT}`));
-
-// 🔁 Auto-Refresh: ruft alle 10 Sekunden automatisch den Crawler auf
-const axios = await import("axios");
-
-async function autoUpdate() {
+// 🔁 Externer Ping: Fly hält die App wach
+async function autoPing() {
   try {
     const url = "https://fahregut-auto-crawler.fly.dev/crawl";
-    const res = await axios.default.get(url);
+    const res = await axios.get(url);
     console.log("🔄 Live-Check:", res.data.length, "Anzeigen geladen");
   } catch (err) {
     console.log("⚠️ Auto-Update-Fehler:", err.message);
   }
 }
 
-// alle 10 Sekunden automatisch starten
-setInterval(autoUpdate, 10000);
-console.log("🕒 Live-Auto-Update aktiviert (Intervall 10 Sekunden)");
+setInterval(autoPing, 10000);
+console.log("🕒 Live-Auto-Update aktiviert (Intervall 10 Sekunden, nur neue Inserate werden geloggt)");
 
+// 🌐 Server starten
+app.listen(PORT, () =>
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.0 (Realtime Smart)`)
+);
