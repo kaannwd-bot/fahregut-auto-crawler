@@ -1,5 +1,4 @@
 import express from "express";
-import fs from "fs";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 
@@ -13,7 +12,7 @@ app.get("/", (req, res) => {
   res.send("🚗 Fahregut Auto-Crawler läuft (Version 4 – direkte JSON-Ausgabe ✅)");
 });
 
-// ✅ Crawl-Route
+// ✅ Crawl-Route – liefert sofort JSON zurück
 app.get("/crawl", async (req, res) => {
   const { marke = "", modell = "" } = req.query;
   const query = [marke, modell].filter(Boolean).join(" ");
@@ -31,7 +30,7 @@ app.get("/crawl", async (req, res) => {
     }
 
     console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
-    res.json(cars); // <---- DIREKT JSON zurückgeben!
+    res.json(cars); // <---- Direkt JSON-Antwort an PHP
   } catch (err) {
     console.error("❌ Fehler beim Crawlen:", err.message);
     res.status(500).json({ error: "Crawler-Fehler", details: err.message });
@@ -40,7 +39,9 @@ app.get("/crawl", async (req, res) => {
 
 // 🔧 Haupt-Crawler-Funktion
 async function crawlKleinanzeigen(searchUrl) {
+  console.log("🕒 Starte Puppeteer...");
   const executablePath = await chromium.executablePath();
+
   const browser = await puppeteer.launch({
     args: [
       ...chromium.args,
@@ -74,9 +75,11 @@ async function crawlKleinanzeigen(searchUrl) {
     console.log("⚠️ Kein Cookie-Banner sichtbar");
   }
 
+  // 🔄 Scrollen bis alles geladen ist
   await autoScroll(page);
   console.log("🔎 Lese Fahrzeugdaten...");
 
+  // ✅ Fahrzeuge extrahieren
   const cars = await page.evaluate(() => {
     const arr = [];
     document.querySelectorAll("article[data-testid='listing-ad'], article").forEach((el) => {
@@ -91,6 +94,7 @@ async function crawlKleinanzeigen(searchUrl) {
   });
 
   await browser.close();
+  console.log(`💾 ${cars.length} Fahrzeuge extrahiert ✅`);
   return cars;
 }
 
