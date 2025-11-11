@@ -9,10 +9,10 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("🚗 Fahregut Auto-Crawler läuft (Version 4 – direkte JSON-Ausgabe ✅)");
+  res.send("🚗 Fahregut Auto-Crawler läuft (Version 5 – stabil mit Auto-Fallback & Timeout ✅)");
 });
 
-// ✅ Crawl-Route – liefert sofort JSON zurück
+// ✅ Crawl-Route – liefert direkt JSON zurück
 app.get("/crawl", async (req, res) => {
   const { marke = "", modell = "" } = req.query;
   const query = [marke, modell].filter(Boolean).join(" ");
@@ -22,7 +22,13 @@ app.get("/crawl", async (req, res) => {
   console.log(`🔍 Anfrage: ${searchUrl}`);
 
   try {
-    const cars = await crawlKleinanzeigen(searchUrl);
+    // ⏱ Timeout-Schutz (max. 90 Sekunden)
+    const cars = await Promise.race([
+      crawlKleinanzeigen(searchUrl),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout – Puppeteer zu lange beschäftigt")), 90000)
+      ),
+    ]);
 
     if (!cars || cars.length === 0) {
       console.log("⚠️ Keine Fahrzeuge gefunden.");
@@ -30,33 +36,39 @@ app.get("/crawl", async (req, res) => {
     }
 
     console.log(`✅ ${cars.length} Fahrzeuge gefunden.`);
-    res.json(cars); // <---- Direkt JSON-Antwort an PHP
+    res.json(cars);
   } catch (err) {
     console.error("❌ Fehler beim Crawlen:", err.message);
     res.status(500).json({ error: "Crawler-Fehler", details: err.message });
   }
 });
 
-// 🔧 Haupt-Crawler-Funktion
+// 🔧 Haupt-Crawler-Funktion (mit automatischem Fallback)
 async function crawlKleinanzeigen(searchUrl) {
   console.log("🕒 Starte Puppeteer...");
-  const executablePath = await chromium.executablePath();
 
-  const browser = await puppeteer.launch({
-    args: [
-      ...chromium.args,
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--single-process",
-      "--no-zygote",
-    ],
-    executablePath,
-    headless: true,
-    ignoreHTTPSErrors: true,
-    defaultViewport: { width: 1280, height: 900 },
-  });
+  let browser;
+  try {
+    const executablePath = await chromium.executablePath();
+    browser = await puppeteer.launch({
+      args: [
+        ...chromium.args,
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+      executablePath,
+      headless: chromium.headless,
+    });
+  } catch (err) {
+    console.error("⚠️ Sparticuz Chromium konnte nicht gestartet werden:", err.message);
+    console.log("🔁 Fallback: Standard-Puppeteer wird verwendet...");
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+  }
 
   const page = await browser.newPage();
   await page.setUserAgent(
@@ -66,7 +78,7 @@ async function crawlKleinanzeigen(searchUrl) {
   console.log("🌍 Lade Seite:", searchUrl);
   await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 120000 });
 
-  // ✅ Cookies akzeptieren
+  // ✅ Cookies akzeptieren (wenn vorhanden)
   try {
     await page.waitForSelector("button[aria-label*='Alle akzeptieren']", { timeout: 8000 });
     await page.click("button[aria-label*='Alle akzeptieren']");
@@ -79,7 +91,7 @@ async function crawlKleinanzeigen(searchUrl) {
   await autoScroll(page);
   console.log("🔎 Lese Fahrzeugdaten...");
 
-  // ✅ Fahrzeuge extrahieren
+  // ✅ Fahrzeugdaten extrahieren
   const cars = await page.evaluate(() => {
     const arr = [];
     document.querySelectorAll("article[data-testid='listing-ad'], article").forEach((el) => {
