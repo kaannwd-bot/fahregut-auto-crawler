@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 8.3 (Correct Date Sorting + Stable Filter ✅)
+// 🚗 Fahregut Auto-Crawler – Version 8.5 (Realtime + Instant Update + Perfect Sorting ✅)
 // Puppeteer-Core + System Chromium (Fly.io Verified Build)
 
 import express from "express";
@@ -17,39 +17,39 @@ let seenUrls = new Set();
 let lastUpdate = 0;
 let isUpdating = false;
 
-// 🔍 Kleinanzeigen tarihini çöz
+// 🌐 Global browser & page (tek seferde başlatılır)
+let browser = null;
+let page = null;
+
+// 🔍 Kleinanzeigen tarih çözümü
 function parseKleinanzeigenTime(str) {
   if (!str) return null;
   const now = new Date();
   if (str.includes("Heute")) {
-    const match = str.match(/(\d{1,2}):(\d{2})/);
-    if (match) {
+    const m = str.match(/(\d{1,2}):(\d{2})/);
+    if (m) {
       const d = new Date(now);
-      d.setHours(+match[1], +match[2], 0, 0);
+      d.setHours(+m[1], +m[2], 0, 0);
       return d;
     }
   }
   if (str.includes("Gestern")) {
-    const match = str.match(/(\d{1,2}):(\d{2})/);
+    const m = str.match(/(\d{1,2}):(\d{2})/);
     const d = new Date(now);
     d.setDate(d.getDate() - 1);
-    if (match) d.setHours(+match[1], +match[2], 0, 0);
+    if (m) d.setHours(+m[1], +m[2], 0, 0);
     return d;
   }
-  const m = str.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-  if (m) return new Date(`${m[3]}-${m[2]}-${m[1]}T00:00:00`);
+  const match = str.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (match) return new Date(`${match[3]}-${match[2]}-${match[1]}T00:00:00`);
   return null;
 }
 
-// 🚀 Anzeigen abrufen (filtrelerle)
-async function fetchAds(filters = {}) {
-  const { marke = "", modell = "", preis_von = "", preis_bis = "" } = filters;
-  const queryString = [marke, modell].filter(Boolean).join(" ");
-  console.log("🌍 Abruf gestartet:", queryString || "Alle Autos");
-
+// 🧭 Puppeteer başlat (tek sefer)
+async function initBrowser() {
+  if (browser) return;
   const executablePath = "/usr/bin/chromium";
-
-  const browser = await puppeteer.launch({
+  browser = await puppeteer.launch({
     args: [
       "--no-sandbox",
       "--disable-gpu",
@@ -63,106 +63,101 @@ async function fetchAds(filters = {}) {
     headless: true,
     executablePath,
   });
+  page = await browser.newPage();
+  console.log("🧭 Browser geöffnet (persistent session).");
+}
+
+// 🚀 İlanları çek (tek sayfa reload)
+async function fetchAds(filters = {}) {
+  await initBrowser();
+  const { marke = "", modell = "", preis_von = "", preis_bis = "" } = filters;
+  const queryString = [marke, modell].filter(Boolean).join(" ");
+  let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
+    queryString
+  )}/k0?sorting=date-desc`;
+  if (preis_von || preis_bis) url += `&price=${preis_von || 0}:${preis_bis || ""}`;
+
+  console.log("🌍 Suche:", url);
 
   try {
-    const page = await browser.newPage();
-    let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
-      queryString
-    )}/k0?sorting=date-desc`;
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
 
-    if (preis_von || preis_bis) {
-      url += `&price=${preis_von || 0}:${preis_bis || ""}`;
-    }
-
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-
+    // 🍪 Cookie banner
     try {
-      await page.waitForSelector('button[aria-label="Alle akzeptieren"]', { timeout: 7000 });
-      await page.click('button[aria-label="Alle akzeptieren"]');
-      await new Promise((r) => setTimeout(r, 1000));
-    } catch {
-      console.log("➡️ Kein Cookie-Banner gefunden.");
+      const cookie = await page.$('button[aria-label="Alle akzeptieren"]');
+      if (cookie) {
+        await cookie.click();
+        await new Promise((r) => setTimeout(r, 800));
+        console.log("🍪 Cookies akzeptiert");
+      }
+    } catch {}
+
+    // 🔄 Scroll (daha fazla ilan)
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
+      await new Promise((r) => setTimeout(r, 500));
     }
 
-    await page.evaluate(async () => {
-      for (let i = 0; i < 3; i++) {
-        window.scrollBy(0, document.body.scrollHeight);
-        await new Promise((r) => setTimeout(r, 800));
-      }
-    });
+    await page.waitForSelector("article.aditem", { timeout: 15000 });
 
-    await page.waitForSelector("article.aditem, .aditem--featured, .aditem--galleryitem", { timeout: 15000 });
-
-    const ads = await page.$$eval(
-      "article.aditem, .aditem--featured, .aditem--galleryitem",
-      (items) =>
-        items.slice(0, 50).map((item) => {
+    const ads = await page.$$eval("article.aditem", (items) =>
+      items
+        .filter((i) => !i.className.includes("featured")) // sponsorları atla
+        .slice(0, 50)
+        .map((item) => {
           const title =
             item.querySelector(".aditem-main--middle--title")?.textContent.trim() ||
             item.querySelector("h2")?.textContent.trim() ||
             "Kein Titel";
-
-          const price = item.querySelector(".aditem-main--middle--price-shipping--price")?.textContent.trim() || "";
+          const price =
+            item.querySelector(".aditem-main--middle--price-shipping--price")?.textContent.trim() ||
+            "";
           const location = item.querySelector(".aditem-main--top--left")?.textContent.trim() || "";
           const time = item.querySelector(".aditem-main--top--right")?.textContent.trim() || "";
           const image = item.querySelector("img")?.src || "";
           const url = item.querySelector("a")?.href || "";
-          const details = item.querySelector(".aditem-main--middle--description")?.textContent.trim() || "";
-
+          const details =
+            item.querySelector(".aditem-main--middle--description")?.textContent.trim() || "";
           return { title, price, location, image, url, details, time };
         })
     );
 
-    // 🔄 Doğru sıralama (en yeni en üste)
+    // 🔄 Tarihe göre sıralama (yeni → eski)
     const sortedAds = ads
-      .map((a) => ({
-        ...a,
-        parsedDate: parseKleinanzeigenTime(a.time) || new Date(0),
-      }))
+      .map((a) => ({ ...a, parsedDate: parseKleinanzeigenTime(a.time) || new Date(0) }))
       .sort((a, b) => b.parsedDate - a.parsedDate);
 
-    await browser.close();
-    console.log(`📦 ${sortedAds.length} Anzeigen gefunden (sortiert).`);
     return sortedAds;
   } catch (err) {
-    console.error("⚠️ Fehler beim Abrufen:", err.message);
-    await browser.close();
+    console.error("⚠️ fetchAds Fehler:", err.message);
     return [];
   }
 }
 
-// 🔁 Nur neue Anzeigen abrufen
+// 🔁 Yalnızca yeni ilanları getir (her 5 saniye)
 async function updateAds(filters = {}) {
   const now = Date.now();
-  if (isUpdating || now - lastUpdate < 10000) return [];
+  if (isUpdating || now - lastUpdate < 5000) return [];
   isUpdating = true;
-
-  console.log("🔄 Suche nach neuen Anzeigen...");
 
   try {
     const allAds = await fetchAds(filters);
-    const newOnes = allAds.filter((a) => a.url && !seenUrls.has(a.url));
+    const fresh = allAds.filter((a) => a.url && !seenUrls.has(a.url));
 
-    const cutoff = new Date(Date.now() - 60 * 60 * 1000);
-    const freshAds = newOnes.filter((a) => {
-      const adDate = parseKleinanzeigenTime(a.time);
-      return adDate && adDate >= cutoff;
-    });
+    fresh.forEach((a) => seenUrls.add(a.url));
 
-    freshAds.forEach((a) => seenUrls.add(a.url));
-
-    console.log(`🆕 ${freshAds.length} neue Anzeigen gesendet.`);
+    console.log(`🆕 ${fresh.length} neue Anzeigen gefunden.`);
     lastUpdate = now;
-    return freshAds;
+    return fresh;
   } catch (err) {
-    console.error("⚠️ Update-Fehler:", err.message);
+    console.error("⚠️ Update Fehler:", err.message);
     return [];
   } finally {
     isUpdating = false;
   }
 }
 
-// 🌍 API: Nur neue Anzeigen zurückgeben
+// 🌍 API: her 5 s’de yeni ilan döner
 app.get("/crawl", async (req, res) => {
   try {
     const filters = req.query || {};
@@ -175,15 +170,15 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.3 – Correct Date Sorting ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.5 – Realtime + Instant Update ✅)");
 });
 
-// 🔁 Fly wach halten (alle 20 Sekunden)
+// 🔁 Keepalive (Fly)
 setInterval(() => {
   axios.get("https://fahregut-auto-crawler.fly.dev/health").catch(() => {});
 }, 20000);
 
-// 🌐 Server starten
-app.listen(PORT, () => {
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.3 ✅`);
-});
+// 🚀 Start
+app.listen(PORT, () =>
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.5 ✅`)
+);
