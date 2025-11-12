@@ -1,10 +1,11 @@
-// 🚗 Fahregut Auto-Crawler – Version 8.7 (Realtime + WebSocket Push + Perfect Sorting ✅)
-// Puppeteer-Core + System Chromium (Fly.io Verified Build)
+// 🚗 Fahregut Auto-Crawler – Version 8.8 (Single-Port WebSocket + Instant Push + Perfect Sorting ✅)
+// Puppeteer-Core + System Chromium (Fly.io Fully Compatible Build)
 
 import express from "express";
 import puppeteer from "puppeteer-core";
 import cors from "cors";
 import axios from "axios";
+import http from "http";
 import { WebSocketServer } from "ws";
 
 const app = express();
@@ -12,7 +13,6 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
-const WS_PORT = 8081; // WebSocket port
 
 // 🧠 Speicher (nur neue Anzeigen)
 let seenUrls = new Set();
@@ -74,9 +74,7 @@ async function fetchAds(filters = {}) {
   await initBrowser();
   const { marke = "", modell = "", preis_von = "", preis_bis = "" } = filters;
   const queryString = [marke, modell].filter(Boolean).join(" ");
-  let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
-    queryString
-  )}/k0?sorting=date-desc`;
+  let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(queryString)}/k0?sorting=date-desc`;
   if (preis_von || preis_bis) url += `&price=${preis_von || 0}:${preis_bis || ""}`;
 
   console.log("🌍 Suche:", url);
@@ -112,8 +110,7 @@ async function fetchAds(filters = {}) {
             item.querySelector("h2")?.textContent.trim() ||
             "Kein Titel";
           const price =
-            item.querySelector(".aditem-main--middle--price-shipping--price")?.textContent.trim() ||
-            "";
+            item.querySelector(".aditem-main--middle--price-shipping--price")?.textContent.trim() || "";
           const location = item.querySelector(".aditem-main--top--left")?.textContent.trim() || "";
           const time = item.querySelector(".aditem-main--top--right")?.textContent.trim() || "";
           const image = item.querySelector("img")?.src || "";
@@ -136,25 +133,10 @@ async function fetchAds(filters = {}) {
   }
 }
 
-// 🧠 WebSocket Setup
-const wss = new WebSocketServer({ port: WS_PORT });
-let clients = new Set();
-
-wss.on("connection", (ws, req) => {
-  const params = new URLSearchParams(req.url.split("?")[1]);
-  clients.add({ ws, params });
-  console.log("📡 Neuer WS-Client verbunden");
-  ws.send(JSON.stringify([{ title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." }]));
-  ws.on("close", () => {
-    clients.delete(ws);
-    console.log("❌ WS-Client getrennt");
-  });
-});
-
-// 🔁 Yalnızca yeni ilanları getir (her 5 saniye)
+// 🔁 Yalnızca yeni ilanları getir (her 3 saniye)
 async function updateAds(filters = {}) {
   const now = Date.now();
-  if (isUpdating || now - lastUpdate < 5000) return [];
+  if (isUpdating || now - lastUpdate < 3000) return [];
   isUpdating = true;
 
   try {
@@ -166,8 +148,8 @@ async function updateAds(filters = {}) {
       console.log(`🆕 ${fresh.length} neue Anzeigen gefunden.`);
       // WebSocket Push
       for (const client of clients) {
-        if (client.ws.readyState === 1) {
-          client.ws.send(JSON.stringify(fresh));
+        if (client.readyState === 1) {
+          client.send(JSON.stringify(fresh));
         }
       }
     } else {
@@ -184,7 +166,7 @@ async function updateAds(filters = {}) {
   }
 }
 
-// 🌍 API: her 5 s’de yeni ilan döner
+// 🌍 API: manuel tetikleme
 app.get("/crawl", async (req, res) => {
   try {
     const filters = req.query || {};
@@ -197,7 +179,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.7 – WebSocket Push ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.8 – Single-Port WebSocket ✅)");
 });
 
 // 🔁 Keepalive (Fly)
@@ -205,7 +187,25 @@ setInterval(() => {
   axios.get("https://fahregut-auto-crawler.fly.dev/health").catch(() => {});
 }, 20000);
 
+// 🧠 HTTP + WebSocket aynı portta
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+const clients = new Set();
+
+wss.on("connection", (ws) => {
+  clients.add(ws);
+  console.log("📡 Neuer WebSocket-Client verbunden");
+  ws.send(JSON.stringify([{ title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." }]));
+  ws.on("close", () => {
+    clients.delete(ws);
+    console.log("❌ WS-Client getrennt");
+  });
+});
+
+// 🔄 Sürekli kontrol (her 3 saniye)
+setInterval(() => updateAds({}), 3000);
+
 // 🚀 Start
-app.listen(PORT, () =>
-  console.log(`🚗 HTTP läuft auf Port ${PORT}, WebSocket auf ${WS_PORT} – Version 8.7 ✅`)
-);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚗 Server läuft auf Port ${PORT} – WebSocket + HTTP aktiv ✅`);
+});
