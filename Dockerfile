@@ -1,27 +1,28 @@
-# 🚗 Fahregut Auto-Crawler – Fly.io Stable (Version 6.9)
-FROM node:18-slim
+# 🚀 Dockerfile für Fly.io – Chromium + Puppeteer-Core
+FROM node:20-slim
 
-# 🧰 Systempakete + Chromium installieren
-RUN apt-get update && \
-    apt-get install -y chromium && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Installiere notwendige Pakete
+RUN apt-get update && apt-get install -y \
+    chromium \
+    fonts-liberation \
+    libatk-bridge2.0-0 \
+    libnss3 \
+    libxss1 \
+    libgtk-3-0 \
+    libasound2 \
+    libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# 🔧 Arbeitsverzeichnis
+# Arbeitsverzeichnis
 WORKDIR /app
 
-# 🔹 Abhängigkeiten installieren
+# Projektdateien kopieren
 COPY package*.json ./
-RUN npm install
-
-# 🔹 Code kopieren
+RUN npm install --omit=dev
 COPY . .
 
-# 🌍 Umgebungsvariablen
-ENV PORT=8080
-ENV NODE_ENV=production
-ENV CHROMIUM_PATH=/usr/bin/chromium
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# Exponiere Port
+EXPOSE 8080
 
-# 🚀 App starten
+# Starte App
 CMD ["node", "server.js"]
