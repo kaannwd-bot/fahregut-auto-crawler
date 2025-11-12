@@ -1,5 +1,5 @@
-// 🚗 Fahregut Auto-Crawler – Version 8.9 (Fly.io Single-Port WebSocket Fix ✅)
-// Puppeteer-Core + System Chromium – 2025 Stable Build
+// 🚗 Fahregut Auto-Crawler – Version 9.0 (Full Filter Support + Fly.io Single-Port WS)
+// Puppeteer-Core + Chromium – 2025 Stable
 
 import express from "express";
 import puppeteer from "puppeteer-core";
@@ -14,16 +14,14 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-// 🧠 Bellek (yeni ilanlar için)
+// 🧠 Speicher
 let seenUrls = new Set();
 let lastUpdate = 0;
 let isUpdating = false;
-
-// 🌐 Global browser & page (tek seferde başlatılır)
 let browser = null;
 let page = null;
 
-// 🔍 Kleinanzeigen tarih çözümü
+// 🔍 Zeitparser Kleinanzeigen
 function parseKleinanzeigenTime(str) {
   if (!str) return null;
   const now = new Date();
@@ -47,7 +45,7 @@ function parseKleinanzeigenTime(str) {
   return null;
 }
 
-// 🧭 Puppeteer başlat (tek sefer)
+// 🧭 Browser starten
 async function initBrowser() {
   if (browser) return;
   const executablePath = "/usr/bin/chromium";
@@ -69,19 +67,81 @@ async function initBrowser() {
   console.log("🧭 Browser geöffnet (persistent session).");
 }
 
-// 🚀 İlanları çek
+// 🔗 URL Builder für Filter
+function buildSearchUrl(filters = {}) {
+  const {
+    marke = "",
+    modell = "",
+    preis_von = "",
+    preis_bis = "",
+    km_von = "",
+    km_bis = "",
+    ez_von = "",
+    ez_bis = "",
+    ps_von = "",
+    ps_bis = "",
+    kraftstoff = "",
+    getriebe = "",
+    zustand = "",
+    typ = "",
+    farbe = "",
+    bundesland = "",
+    anbieter = "",
+    angebot = "",
+  } = filters;
+
+  let query = [marke, modell].filter(Boolean).join(" ");
+  let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0?sorting=date-desc`;
+
+  // Preis
+  if (preis_von || preis_bis)
+    url += `&price=${preis_von || 0}:${preis_bis || ""}`;
+  // Kilometer
+  if (km_von || km_bis) url += `&mileage=${km_von || 0}:${km_bis || ""}`;
+  // Erstzulassung
+  if (ez_von || ez_bis)
+    url += `&firstRegistrationDate=${ez_von || 0}:${ez_bis || ""}`;
+  // Leistung
+  if (ps_von || ps_bis) url += `&power=${ps_von || 0}:${ps_bis || ""}`;
+  // Kraftstoff
+  if (kraftstoff)
+    url += `&fuel=${encodeURIComponent(kraftstoff.toLowerCase())}`;
+  // Getriebe
+  if (getriebe)
+    url += `&transmission=${encodeURIComponent(getriebe.toLowerCase())}`;
+  // Zustand
+  if (zustand.includes("Unbesch")) url += "&condition=unbeschädigt";
+  if (zustand.includes("Besch")) url += "&condition=beschädigt";
+  // Typ
+  if (typ) url += `&carType=${encodeURIComponent(typ.toLowerCase())}`;
+  // Farbe
+  if (farbe) url += `&color=${encodeURIComponent(farbe.toLowerCase())}`;
+  // Anbieter
+  if (anbieter)
+    url +=
+      anbieter === "Privat"
+        ? "&adType=private"
+        : "&adType=business";
+  // Angebotstyp
+  if (angebot)
+    url += angebot === "Gesuch" ? "&offerType=search" : "&offerType=sell";
+  // Ort / Bundesland (Filter nur symbolisch, Kleinanzeigen nutzt PLZ/Geo)
+  if (bundesland)
+    url += `&geo=${encodeURIComponent(bundesland.toLowerCase())}`;
+
+  return url;
+}
+
+// 🚀 Anzeigen abrufen
 async function fetchAds(filters = {}) {
   await initBrowser();
-  const { marke = "", modell = "", preis_von = "", preis_bis = "" } = filters;
-  const queryString = [marke, modell].filter(Boolean).join(" ");
-  let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(queryString)}/k0?sorting=date-desc`;
-  if (preis_von || preis_bis) url += `&price=${preis_von || 0}:${preis_bis || ""}`;
-
+  const url = buildSearchUrl(filters);
   console.log("🌍 Suche:", url);
 
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
 
+    // Cookies akzeptieren
     try {
       const cookie = await page.$('button[aria-label="Alle akzeptieren"]');
       if (cookie) {
@@ -91,6 +151,7 @@ async function fetchAds(filters = {}) {
       }
     } catch {}
 
+    // Scroll
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
       await new Promise((r) => setTimeout(r, 400));
@@ -108,52 +169,55 @@ async function fetchAds(filters = {}) {
             item.querySelector("h2")?.textContent.trim() ||
             "Kein Titel";
           const price =
-            item.querySelector(".aditem-main--middle--price-shipping--price")?.textContent.trim() || "";
-          const location = item.querySelector(".aditem-main--top--left")?.textContent.trim() || "";
-          const time = item.querySelector(".aditem-main--top--right")?.textContent.trim() || "";
+            item.querySelector(".aditem-main--middle--price-shipping--price")
+              ?.textContent.trim() || "";
+          const location =
+            item.querySelector(".aditem-main--top--left")?.textContent.trim() ||
+            "";
+          const time =
+            item.querySelector(".aditem-main--top--right")?.textContent.trim() ||
+            "";
           const image = item.querySelector("img")?.src || "";
           const url = item.querySelector("a")?.href || "";
           const details =
-            item.querySelector(".aditem-main--middle--description")?.textContent.trim() || "";
+            item.querySelector(".aditem-main--middle--description")
+              ?.textContent.trim() || "";
           return { title, price, location, image, url, details, time };
         })
     );
 
-    const sortedAds = ads
-      .map((a) => ({ ...a, parsedDate: parseKleinanzeigenTime(a.time) || new Date(0) }))
+    const sorted = ads
+      .map((a) => ({
+        ...a,
+        parsedDate: parseKleinanzeigenTime(a.time) || new Date(0),
+      }))
       .sort((a, b) => b.parsedDate - a.parsedDate);
 
-    return sortedAds;
+    return sorted;
   } catch (err) {
     console.error("⚠️ fetchAds Fehler:", err.message);
     return [];
   }
 }
 
-// 🔁 Yeni ilanları getir (2 saniyede bir)
+// 🔁 Live-Update
 async function updateAds(filters = {}) {
   const now = Date.now();
   if (isUpdating || now - lastUpdate < 2000) return [];
   isUpdating = true;
 
   try {
-    const allAds = await fetchAds(filters);
-    const fresh = allAds.filter((a) => a.url && !seenUrls.has(a.url));
+    const all = await fetchAds(filters);
+    const fresh = all.filter((a) => a.url && !seenUrls.has(a.url));
     fresh.forEach((a) => seenUrls.add(a.url));
 
     if (fresh.length > 0) {
-      console.log(`🆕 ${fresh.length} neue Anzeigen gefunden.`);
-      [...clients].forEach((client) => {
-        try {
-          if (client.readyState === 1) client.send(JSON.stringify(fresh));
-        } catch (err) {
-          console.warn("WS Send Error:", err.message);
-        }
+      console.log(`🆕 ${fresh.length} neue Anzeigen.`);
+      [...clients].forEach((ws) => {
+        if (ws.readyState === 1)
+          ws.send(JSON.stringify(fresh));
       });
-    } else {
-      console.log("🟢 Keine neuen Anzeigen.");
-    }
-
+    } else console.log("🟢 Keine neuen Anzeigen.");
     lastUpdate = now;
     return fresh;
   } catch (err) {
@@ -164,46 +228,62 @@ async function updateAds(filters = {}) {
   }
 }
 
-// 🌍 API
+// 🌍 HTTP API
 app.get("/crawl", async (req, res) => {
   try {
     const filters = req.query || {};
-    const newAds = await updateAds(filters);
-    res.json(newAds);
+    const data = await updateAds(filters);
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: "Crawler-Fehler", details: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
 // 💓 Healthcheck
-app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.9 – Fly.io Single-Port WebSocket ✅)");
-});
+app.get("/health", (_, res) =>
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.0 – Full Filter WS ✅)")
+);
 
-// 🔁 Keepalive (Fly.io)
+// 🔁 Keepalive
 setInterval(() => {
   axios.get("https://fahregut-auto-crawler.fly.dev/health").catch(() => {});
 }, 20000);
 
-// 🧠 HTTP + WebSocket aynı portta
+// 🧠 HTTP + WS
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const clients = new Set();
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   clients.add(ws);
-  console.log("📡 Neuer WebSocket-Client verbunden");
+  console.log("📡 WS-Client verbunden");
+
+  // 🔍 URL params + message listener
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  let filters = Object.fromEntries(url.searchParams.entries());
+
   ws.send(JSON.stringify([{ title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." }]));
+
+  ws.on("message", (msg) => {
+    try {
+      const data = JSON.parse(msg.toString());
+      if (data.type === "filter") {
+        filters = { ...filters, ...data };
+        console.log("🎯 Neue Filter erhalten:", filters);
+      }
+    } catch {}
+  });
+
   ws.on("close", () => {
     clients.delete(ws);
     console.log("❌ WS-Client getrennt");
   });
 });
 
-// 🔄 Sürekli kontrol
+// 🔄 Dauer-Update
 setInterval(() => updateAds({}), 2000);
 
-// 🚀 Start (hem IPv4 hem IPv6 için)
-server.listen(PORT, ["0.0.0.0", "::"], () => {
-  console.log(`🚗 Server läuft auf 0.0.0.0:${PORT} – HTTP + WS aktiv ✅`);
-});
+// 🚀 Start IPv4+IPv6
+server.listen(PORT, ["0.0.0.0", "::"], () =>
+  console.log(`🚗 Server läuft auf Port ${PORT} – HTTP + WS aktiv ✅`)
+);
