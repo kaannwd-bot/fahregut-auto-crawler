@@ -1,6 +1,6 @@
 # -------------------------------------------------------------
 # 🚀 Fly.io Config – Fahregut Auto-Crawler (Chromium + WebSocket)
-# Optimized for long-running WebSocket + Puppeteer on Fly.io
+# Stable Version – Optimized for long-running Puppeteer sessions
 # -------------------------------------------------------------
 
 app = "fahregut-auto-crawler"
@@ -21,6 +21,8 @@ primary_region = "fra"
   PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
   LANG = "de_DE.UTF-8"
   LC_ALL = "de_DE.UTF-8"
+  TZ = "Europe/Berlin"
+  DEBIAN_FRONTEND = "noninteractive"
 
 # -------------------------------------------------------------
 # 🌐 HTTP Service Configuration
@@ -28,9 +30,9 @@ primary_region = "fra"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_start_machines = true          # bei Traffic automatisch starten
-  auto_stop_machines = false          # WebSocket Stabilität: kein Stop
-  min_machines_running = 1            # Immer 1 Instanz aktiv halten
+  auto_start_machines = true           # bei Traffic automatisch starten
+  auto_stop_machines = false           # WebSocket stabil bleiben
+  min_machines_running = 1             # immer 1 aktiv halten
   concurrency = { type = "requests", hard_limit = 100, soft_limit = 80 }
 
   [http_service.http_options]
@@ -46,9 +48,9 @@ primary_region = "fra"
 [[checks]]
   type = "http"
   name = "auto-health"
-  interval = "25s"
+  interval = "30s"
   timeout = "5s"
-  grace_period = "10s"
+  grace_period = "20s"
   path = "/health"
   method = "get"
   protocol = "http"
@@ -59,9 +61,9 @@ primary_region = "fra"
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory = "2048mb"           # 2 GB RAM für Chromium + Puppeteer
+  memory = "2048mb"             # 2GB RAM – Puppeteer için minimum öneri
   kernel_args = ["vm.overcommit_memory=1"]
-  swap_size_mb = 512          # Extra Speicherpuffer gegen OutOfMemory
+  swap_size_mb = 1024           # 1GB Swap – Chromium OutOfMemory fix
 
 # -------------------------------------------------------------
 # ⚡️ TCP Service (WebSocket Support)
