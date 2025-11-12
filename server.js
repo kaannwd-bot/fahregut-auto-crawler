@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 8.0 (Incremental + Title Fix ✅)
+// 🚗 Fahregut Auto-Crawler – Version 8.2 (Filter + Real Date Fix ✅)
 // Puppeteer-Core + System Chromium (Fly.io Verified Build)
 
 import express from "express";
@@ -17,9 +17,35 @@ let seenUrls = new Set(); // sadece yeni ilan kontrolü için
 let lastUpdate = 0;
 let isUpdating = false;
 
-// 🚀 Funktion: Anzeigen abrufen
-async function fetchAds(query = "") {
-  console.log("🌍 Abruf gestartet:", query || "Alle Autos");
+// 🔍 Kleinanzeigen tarihini çöz
+function parseKleinanzeigenTime(str) {
+  if (!str) return null;
+  const now = new Date();
+  if (str.includes("Heute")) {
+    const match = str.match(/(\d{1,2}):(\d{2})/);
+    if (match) {
+      const d = new Date(now);
+      d.setHours(+match[1], +match[2], 0, 0);
+      return d;
+    }
+  }
+  if (str.includes("Gestern")) {
+    const match = str.match(/(\d{1,2}):(\d{2})/);
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    if (match) d.setHours(+match[1], +match[2], 0, 0);
+    return d;
+  }
+  const m = str.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (m) return new Date(`${m[3]}-${m[2]}-${m[1]}T00:00:00`);
+  return null;
+}
+
+// 🚀 Anzeigen abrufen (filtrelerle)
+async function fetchAds(filters = {}) {
+  const { marke = "", modell = "", preis_von = "", preis_bis = "" } = filters;
+  const queryString = [marke, modell].filter(Boolean).join(" ");
+  console.log("🌍 Abruf gestartet:", queryString || "Alle Autos");
 
   const executablePath = "/usr/bin/chromium";
 
@@ -40,68 +66,58 @@ async function fetchAds(query = "") {
 
   try {
     const page = await browser.newPage();
-    const url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
-      query
+    let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
+      queryString
     )}/k0?sorting=date-desc`;
+
+    // Preisfilter varsa query'e ekle
+    if (preis_von || preis_bis) {
+      url += `&price=${preis_von || 0}:${preis_bis || ""}`;
+    }
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
-    // 🍪 Cookie-Banner automatisch akzeptieren
+    // 🍪 Cookie-Banner
     try {
       await page.waitForSelector('button[aria-label="Alle akzeptieren"]', { timeout: 7000 });
       await page.click('button[aria-label="Alle akzeptieren"]');
-      console.log("🍪 Cookie-Banner akzeptiert");
-      await new Promise((r) => setTimeout(r, 1200));
+      await new Promise((r) => setTimeout(r, 1000));
     } catch {
-      console.log("➡️ Kein Cookie-Banner gefunden (weiter).");
+      console.log("➡️ Kein Cookie-Banner gefunden.");
     }
 
-    // 🔄 Scrollen (mehr Anzeigen laden)
+    // 🔄 Scroll
     await page.evaluate(async () => {
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
         window.scrollBy(0, document.body.scrollHeight);
         await new Promise((r) => setTimeout(r, 800));
       }
     });
 
-    // 🕒 Anzeigen-Container warten
     await page.waitForSelector("article.aditem, .aditem--featured, .aditem--galleryitem", { timeout: 15000 });
 
-    // 📦 Anzeigen erfassen (inkl. Featured + Gallery)
     const ads = await page.$$eval(
       "article.aditem, .aditem--featured, .aditem--galleryitem",
       (items) =>
-        items.slice(0, 40).map((item) => {
-          const titleEl =
-            item.querySelector(".aditem-main--middle--title") ||
-            item.querySelector("h2") ||
-            item.querySelector("a");
-          const title = titleEl ? titleEl.textContent.trim().replace(/\s+/g, " ") : "Kein Titel";
+        items.slice(0, 50).map((item) => {
+          const title =
+            item.querySelector(".aditem-main--middle--title")?.textContent.trim() ||
+            item.querySelector("h2")?.textContent.trim() ||
+            "Kein Titel";
 
-          const priceEl = item.querySelector(".aditem-main--middle--price-shipping--price");
-          const price = priceEl ? priceEl.textContent.trim() : "";
-
-          const locationEl = item.querySelector(".aditem-main--top--left");
-          const location = locationEl ? locationEl.textContent.trim() : "";
-
-          const imageEl = item.querySelector("img");
-          const image = imageEl ? imageEl.src : "";
-
-          const urlEl = item.querySelector("a");
-          const url = urlEl ? urlEl.href : "";
-
-          const detailsEl = item.querySelector(".aditem-main--middle--description");
-          const details = detailsEl ? detailsEl.textContent.trim() : "";
-
-          const timeEl = item.querySelector(".aditem-main--top--right");
-          const time = timeEl ? timeEl.textContent.trim() : "";
+          const price = item.querySelector(".aditem-main--middle--price-shipping--price")?.textContent.trim() || "";
+          const location = item.querySelector(".aditem-main--top--left")?.textContent.trim() || "";
+          const time = item.querySelector(".aditem-main--top--right")?.textContent.trim() || "";
+          const image = item.querySelector("img")?.src || "";
+          const url = item.querySelector("a")?.href || "";
+          const details = item.querySelector(".aditem-main--middle--description")?.textContent.trim() || "";
 
           return { title, price, location, image, url, details, time };
         })
     );
 
-    console.log(`📦 ${ads.length} Anzeigen gefunden.`);
     await browser.close();
+    console.log(`📦 ${ads.length} Anzeigen gefunden.`);
     return ads;
   } catch (err) {
     console.error("⚠️ Fehler beim Abrufen:", err.message);
@@ -111,7 +127,7 @@ async function fetchAds(query = "") {
 }
 
 // 🔁 Nur neue Anzeigen abrufen
-async function updateAds() {
+async function updateAds(filters = {}) {
   const now = Date.now();
   if (isUpdating || now - lastUpdate < 10000) return [];
   isUpdating = true;
@@ -119,15 +135,21 @@ async function updateAds() {
   console.log("🔄 Suche nach neuen Anzeigen...");
 
   try {
-    const allAds = await fetchAds("");
+    const allAds = await fetchAds(filters);
     const newOnes = allAds.filter((a) => a.url && !seenUrls.has(a.url));
 
-    // Neue URLs speichern
-    newOnes.forEach((a) => seenUrls.add(a.url));
+    // Gerçek tarih ile filtre (sadece son 1 saat)
+    const cutoff = new Date(Date.now() - 60 * 60 * 1000);
+    const freshAds = newOnes.filter((a) => {
+      const adDate = parseKleinanzeigenTime(a.time);
+      return adDate && adDate >= cutoff;
+    });
 
-    console.log(`🆕 ${newOnes.length} neue Anzeigen gefunden.`);
+    freshAds.forEach((a) => seenUrls.add(a.url));
+
+    console.log(`🆕 ${freshAds.length} neue Anzeigen gesendet.`);
     lastUpdate = now;
-    return newOnes;
+    return freshAds;
   } catch (err) {
     console.error("⚠️ Update-Fehler:", err.message);
     return [];
@@ -139,7 +161,8 @@ async function updateAds() {
 // 🌍 API: Nur neue Anzeigen zurückgeben
 app.get("/crawl", async (req, res) => {
   try {
-    const newAds = await updateAds();
+    const filters = req.query || {};
+    const newAds = await updateAds(filters);
     res.json(newAds);
   } catch (err) {
     res.status(500).json({ error: "Crawler-Fehler", details: err.message });
@@ -148,7 +171,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.0 – Incremental + Title Fix ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.2 – Filter + Real Date Fix ✅)");
 });
 
 // 🔁 Fly wach halten (alle 20 Sekunden)
@@ -158,5 +181,5 @@ setInterval(() => {
 
 // 🌐 Server starten
 app.listen(PORT, () => {
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.0 ✅`);
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.2 ✅`);
 });
