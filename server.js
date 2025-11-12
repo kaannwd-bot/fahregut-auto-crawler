@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 7.8 (Fly Chromium Full Compatible ✅)
+// 🚗 Fahregut Auto-Crawler – Version 8.0 (Incremental + Title Fix ✅)
 // Puppeteer-Core + System Chromium (Fly.io Verified Build)
 
 import express from "express";
@@ -12,9 +12,8 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-// 🧠 Zwischenspeicher
-let latestAds = [];
-let lastSeenUrls = new Map();
+// 🧠 Speicher (nur neue Anzeigen)
+let seenUrls = new Set(); // sadece yeni ilan kontrolü için
 let lastUpdate = 0;
 let isUpdating = false;
 
@@ -52,7 +51,7 @@ async function fetchAds(query = "") {
       await page.waitForSelector('button[aria-label="Alle akzeptieren"]', { timeout: 7000 });
       await page.click('button[aria-label="Alle akzeptieren"]');
       console.log("🍪 Cookie-Banner akzeptiert");
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 1200));
     } catch {
       console.log("➡️ Kein Cookie-Banner gefunden (weiter).");
     }
@@ -65,16 +64,19 @@ async function fetchAds(query = "") {
       }
     });
 
-    // 🕒 Auf Anzeige warten
+    // 🕒 Anzeigen-Container warten
     await page.waitForSelector("article.aditem, .aditem--featured, .aditem--galleryitem", { timeout: 15000 });
 
-    // 📦 Alle Varianten (inkl. Featured + Gallery)
+    // 📦 Anzeigen erfassen (inkl. Featured + Gallery)
     const ads = await page.$$eval(
       "article.aditem, .aditem--featured, .aditem--galleryitem",
       (items) =>
-        items.slice(0, 30).map((item) => {
-          const titleEl = item.querySelector(".aditem-main--middle--title");
-          const title = titleEl ? titleEl.textContent.trim() : "Unbekanntes Fahrzeug";
+        items.slice(0, 40).map((item) => {
+          const titleEl =
+            item.querySelector(".aditem-main--middle--title") ||
+            item.querySelector("h2") ||
+            item.querySelector("a");
+          const title = titleEl ? titleEl.textContent.trim().replace(/\s+/g, " ") : "Kein Titel";
 
           const priceEl = item.querySelector(".aditem-main--middle--price-shipping--price");
           const price = priceEl ? priceEl.textContent.trim() : "";
@@ -91,13 +93,14 @@ async function fetchAds(query = "") {
           const detailsEl = item.querySelector(".aditem-main--middle--description");
           const details = detailsEl ? detailsEl.textContent.trim() : "";
 
-          return { title, price, location, image, url, details };
+          const timeEl = item.querySelector(".aditem-main--top--right");
+          const time = timeEl ? timeEl.textContent.trim() : "";
+
+          return { title, price, location, image, url, details, time };
         })
     );
 
     console.log(`📦 ${ads.length} Anzeigen gefunden.`);
-    if (ads[0]) console.log("🔍 Erste Anzeige:", ads[0].title);
-
     await browser.close();
     return ads;
   } catch (err) {
@@ -107,44 +110,37 @@ async function fetchAds(query = "") {
   }
 }
 
-// 🔁 Realtime-Update
+// 🔁 Nur neue Anzeigen abrufen
 async function updateAds() {
   const now = Date.now();
-  if (isUpdating || now - lastUpdate < 10000) return;
+  if (isUpdating || now - lastUpdate < 10000) return [];
   isUpdating = true;
 
-  console.log("🔄 Suche nach neuesten Anzeigen...");
+  console.log("🔄 Suche nach neuen Anzeigen...");
+
   try {
-    const newAds = await fetchAds("");
-    const fresh = newAds.filter((a) => a.url && !lastSeenUrls.has(a.url));
+    const allAds = await fetchAds("");
+    const newOnes = allAds.filter((a) => a.url && !seenUrls.has(a.url));
 
-    if (fresh.length > 0) {
-      console.log(`🆕 ${fresh.length} neue Anzeigen gefunden!`);
-      latestAds = [...fresh, ...latestAds].slice(0, 40);
-      fresh.forEach((a) => lastSeenUrls.set(a.url, now));
-    } else {
-      console.log("🟢 Keine neuen Inserate seit letztem Check.");
-    }
+    // Neue URLs speichern
+    newOnes.forEach((a) => seenUrls.add(a.url));
 
-    // Alte löschen (>12h)
-    const cutoff = now - 12 * 60 * 60 * 1000;
-    for (const [url, ts] of lastSeenUrls.entries()) {
-      if (ts < cutoff) lastSeenUrls.delete(url);
-    }
-
+    console.log(`🆕 ${newOnes.length} neue Anzeigen gefunden.`);
     lastUpdate = now;
+    return newOnes;
   } catch (err) {
     console.error("⚠️ Update-Fehler:", err.message);
+    return [];
   } finally {
     isUpdating = false;
   }
 }
 
-// 🌍 API-Route
+// 🌍 API: Nur neue Anzeigen zurückgeben
 app.get("/crawl", async (req, res) => {
   try {
-    if (latestAds.length === 0) await updateAds();
-    res.json(latestAds);
+    const newAds = await updateAds();
+    res.json(newAds);
   } catch (err) {
     res.status(500).json({ error: "Crawler-Fehler", details: err.message });
   }
@@ -152,18 +148,15 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.8 – Full Compatible ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.0 – Incremental + Title Fix ✅)");
 });
 
-// 🕒 Intervall
-setInterval(updateAds, 10000);
-
-// 🔁 Fly wach halten
+// 🔁 Fly wach halten (alle 20 Sekunden)
 setInterval(() => {
-  axios.get("https://fahregut-auto-crawler.fly.dev/crawl").catch(() => {});
-}, 10000);
+  axios.get("https://fahregut-auto-crawler.fly.dev/health").catch(() => {});
+}, 20000);
 
 // 🌐 Server starten
 app.listen(PORT, () => {
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.8 ✅`);
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.0 ✅`);
 });
