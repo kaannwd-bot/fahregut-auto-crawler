@@ -1,10 +1,13 @@
 # -------------------------------------------------------------
 # 🚀 Fahregut Auto-Crawler Dockerfile – Optimized Multi-Layer
-# Chromium + Puppeteer-Core (Fly.io Fast Build)
+# Chromium + Puppeteer-Core (Fly.io Fast Build + Noninteractive Fix)
 # -------------------------------------------------------------
 
 # 🧱 Stage 1: System layer (Chromium & dependencies)
 FROM debian:bookworm-slim AS chromium-base
+
+# 🔧 Noninteractive mode – önleme (Fly.io build freeze fix)
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -26,6 +29,7 @@ RUN apt-get update && \
     libgtk-3-0 \
     xdg-utils \
     wget \
+    curl \
     locales && \
     sed -i '/de_DE.UTF-8/s/^# //g' /etc/locale.gen && locale-gen && \
     rm -rf /var/lib/apt/lists/*
@@ -43,6 +47,14 @@ COPY --from=chromium-base /usr/bin/chromium /usr/bin/chromium
 COPY --from=chromium-base /usr/lib /usr/lib
 COPY --from=chromium-base /lib /lib
 COPY --from=chromium-base /usr/share/locale /usr/share/locale
+COPY --from=chromium-base /usr/share/fonts /usr/share/fonts
+COPY --from=chromium-base /etc/fonts /etc/fonts
+
+# Environment fix
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=de_DE.UTF-8
+ENV LANGUAGE=de_DE:de
+ENV LC_ALL=de_DE.UTF-8
 
 # Arbeitsverzeichnis
 WORKDIR /app
@@ -58,6 +70,8 @@ COPY . .
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
 ENV PORT=8080
+
+# Fly.io graceful shutdown
 STOPSIGNAL SIGTERM
 
 EXPOSE 8080
@@ -66,4 +80,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -fs http://localhost:8080/health || exit 1
 
+# Start command
 CMD ["node", "server.js"]
