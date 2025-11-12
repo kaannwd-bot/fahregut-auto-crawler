@@ -1,39 +1,85 @@
+# -------------------------------------------------------------
 # 🚀 Fly.io Config – Fahregut Auto-Crawler (Chromium + WebSocket)
+# Optimized for long-running WebSocket + Puppeteer on Fly.io
+# -------------------------------------------------------------
+
 app = "fahregut-auto-crawler"
 primary_region = "fra"
 
+# -------------------------------------------------------------
+# 🏗 Build Configuration
+# -------------------------------------------------------------
 [build]
   dockerfile = "Dockerfile"
 
+# -------------------------------------------------------------
+# 🌍 Environment Variables
+# -------------------------------------------------------------
 [env]
   PORT = "8080"
   NODE_ENV = "production"
+  PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+  LANG = "de_DE.UTF-8"
+  LC_ALL = "de_DE.UTF-8"
 
+# -------------------------------------------------------------
+# 🌐 HTTP Service Configuration
+# -------------------------------------------------------------
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_start_machines = true          # trafik gelince otomatik başlat
-  auto_stop_machines = false          # WS stabil + cache korunsun
-  min_machines_running = 1            # her zaman 1 makine açık
+  auto_start_machines = true          # bei Traffic automatisch starten
+  auto_stop_machines = false          # WebSocket Stabilität: kein Stop
+  min_machines_running = 1            # Immer 1 Instanz aktiv halten
   concurrency = { type = "requests", hard_limit = 100, soft_limit = 80 }
 
   [http_service.http_options]
-    response_headers = { X-Frame-Options = "DENY", X-Content-Type-Options = "nosniff" }
+    response_headers = {
+      X-Frame-Options = "DENY",
+      X-Content-Type-Options = "nosniff",
+      Cache-Control = "no-store"
+    }
 
-# 🔍 Healthcheck – /health endpointini izler
+# -------------------------------------------------------------
+# 🩺 Health Check Configuration
+# -------------------------------------------------------------
 [[checks]]
   type = "http"
   name = "auto-health"
-  interval = "30s"
+  interval = "25s"
   timeout = "5s"
-  grace_period = "15s"
+  grace_period = "10s"
   path = "/health"
   method = "get"
   protocol = "http"
 
-# 🧠 VM-Konfigurasyon
+# -------------------------------------------------------------
+# 🧠 VM Configuration
+# -------------------------------------------------------------
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory = "2048mb"     # 2GB RAM: Puppeteer + Chromium için ideal
+  memory = "2048mb"           # 2 GB RAM für Chromium + Puppeteer
   kernel_args = ["vm.overcommit_memory=1"]
+  swap_size_mb = 512          # Extra Speicherpuffer gegen OutOfMemory
+
+# -------------------------------------------------------------
+# ⚡️ TCP Service (WebSocket Support)
+# -------------------------------------------------------------
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "10s"
+    restart_limit = 5
