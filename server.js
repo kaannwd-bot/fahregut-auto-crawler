@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 8.2 (Filter + Real Date Fix ✅)
+// 🚗 Fahregut Auto-Crawler – Version 8.3 (Correct Date Sorting + Stable Filter ✅)
 // Puppeteer-Core + System Chromium (Fly.io Verified Build)
 
 import express from "express";
@@ -13,7 +13,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 8080;
 
 // 🧠 Speicher (nur neue Anzeigen)
-let seenUrls = new Set(); // sadece yeni ilan kontrolü için
+let seenUrls = new Set();
 let lastUpdate = 0;
 let isUpdating = false;
 
@@ -70,14 +70,12 @@ async function fetchAds(filters = {}) {
       queryString
     )}/k0?sorting=date-desc`;
 
-    // Preisfilter varsa query'e ekle
     if (preis_von || preis_bis) {
       url += `&price=${preis_von || 0}:${preis_bis || ""}`;
     }
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
-    // 🍪 Cookie-Banner
     try {
       await page.waitForSelector('button[aria-label="Alle akzeptieren"]', { timeout: 7000 });
       await page.click('button[aria-label="Alle akzeptieren"]');
@@ -86,7 +84,6 @@ async function fetchAds(filters = {}) {
       console.log("➡️ Kein Cookie-Banner gefunden.");
     }
 
-    // 🔄 Scroll
     await page.evaluate(async () => {
       for (let i = 0; i < 3; i++) {
         window.scrollBy(0, document.body.scrollHeight);
@@ -116,9 +113,17 @@ async function fetchAds(filters = {}) {
         })
     );
 
+    // 🔄 Doğru sıralama (en yeni en üste)
+    const sortedAds = ads
+      .map((a) => ({
+        ...a,
+        parsedDate: parseKleinanzeigenTime(a.time) || new Date(0),
+      }))
+      .sort((a, b) => b.parsedDate - a.parsedDate);
+
     await browser.close();
-    console.log(`📦 ${ads.length} Anzeigen gefunden.`);
-    return ads;
+    console.log(`📦 ${sortedAds.length} Anzeigen gefunden (sortiert).`);
+    return sortedAds;
   } catch (err) {
     console.error("⚠️ Fehler beim Abrufen:", err.message);
     await browser.close();
@@ -138,7 +143,6 @@ async function updateAds(filters = {}) {
     const allAds = await fetchAds(filters);
     const newOnes = allAds.filter((a) => a.url && !seenUrls.has(a.url));
 
-    // Gerçek tarih ile filtre (sadece son 1 saat)
     const cutoff = new Date(Date.now() - 60 * 60 * 1000);
     const freshAds = newOnes.filter((a) => {
       const adDate = parseKleinanzeigenTime(a.time);
@@ -171,7 +175,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.2 – Filter + Real Date Fix ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.3 – Correct Date Sorting ✅)");
 });
 
 // 🔁 Fly wach halten (alle 20 Sekunden)
@@ -181,5 +185,5 @@ setInterval(() => {
 
 // 🌐 Server starten
 app.listen(PORT, () => {
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.2 ✅`);
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.3 ✅`);
 });
