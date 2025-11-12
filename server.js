@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 7.3 (Cookie + DOM Fix ✅)
+// 🚗 Fahregut Auto-Crawler – Version 7.4 (Scroll + Cookie Fix ✅)
 // Fly.io + Puppeteer-Core + Chromium Integration + Nur neue Inserate seit letztem Check
 
 import express from "express";
@@ -6,6 +6,7 @@ import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import cors from "cors";
 import axios from "axios";
+import fs from "fs";
 
 const app = express();
 app.use(cors());
@@ -17,13 +18,13 @@ const CHROMIUM_PATH = await chromium.executablePath;
 chromium.setHeadlessMode = true;
 chromium.setGraphicsMode = false;
 
-// 🧠 Zwischenspeicher
+// 🧠 Speicher
 let latestAds = [];
 let lastSeenUrls = new Map();
 let lastUpdate = 0;
 let isUpdating = false;
 
-// 🚀 Anzeigen abrufen (mit Cookie-Fix & DOM-Wartezeit)
+// 🚀 Anzeigen abrufen
 async function fetchAds(query = "") {
   console.log("🌍 Abruf gestartet:", query || "Alle Autos");
 
@@ -35,6 +36,7 @@ async function fetchAds(query = "") {
   });
 
   const page = await browser.newPage();
+
   const url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
     query
   )}/k0?sorting=date-desc`;
@@ -45,19 +47,26 @@ async function fetchAds(query = "") {
       timeout: 60000,
     });
 
-    // 🧩 Cookie-Banner schließen
+    // 🍪 Cookie-Banner schließen
     try {
-      await page.waitForSelector('button[aria-label="Alle akzeptieren"]', { timeout: 5000 });
+      await page.waitForSelector('button[aria-label="Alle akzeptieren"]', { timeout: 7000 });
       await page.click('button[aria-label="Alle akzeptieren"]');
       console.log("🍪 Cookie-Banner akzeptiert");
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 1500));
     } catch {
       console.log("➡️ Kein Cookie-Banner gefunden (weiter).");
     }
 
+    // ⏳ Scrollen, um dynamische Anzeigen zu laden
+    await page.evaluate(async () => {
+      for (let i = 0; i < 5; i++) {
+        window.scrollBy(0, document.body.scrollHeight);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    });
+
     // ⏳ Warten bis Anzeigen sichtbar
     await page.waitForSelector("article.aditem, .aditem", { timeout: 15000 });
-    await new Promise((r) => setTimeout(r, 2000));
 
     const ads = await page.$$eval("article.aditem, .aditem", (items) =>
       items.slice(0, 20).map((item) => {
@@ -72,7 +81,13 @@ async function fetchAds(query = "") {
     );
 
     console.log(`📦 ${ads.length} Anzeigen gefunden.`);
-    if (ads[0]) console.log("🔍 Erste Anzeige:", ads[0].title || "Keine Titel");
+    if (ads[0]) console.log("🔍 Erste Anzeige:", ads[0].title);
+
+    // Screenshot (zur Fehlersuche)
+    if (ads.length === 0) {
+      await page.screenshot({ path: "/tmp/leer.png", fullPage: true });
+      console.log("📸 Screenshot gespeichert (leer.png) – keine Anzeigen erkannt.");
+    }
 
     await browser.close();
     return ads;
@@ -83,7 +98,7 @@ async function fetchAds(query = "") {
   }
 }
 
-// 🔁 Automatische Realtime-Aktualisierung (nur neue Inserate)
+// 🔁 Realtime Update
 async function updateAds() {
   const now = Date.now();
   if (isUpdating || now - lastUpdate < 10000) return;
@@ -96,9 +111,7 @@ async function updateAds() {
     const fresh = newAds.filter((a) => a.url && !lastSeenUrls.has(a.url));
     if (fresh.length > 0) {
       console.log(`🆕 ${fresh.length} neue Anzeigen gefunden!`);
-      fresh.slice(0, 5).forEach((a, i) =>
-        console.log(`  ${i + 1}. ${a.title} – ${a.price}`)
-      );
+      fresh.forEach((a, i) => console.log(`  ${i + 1}. ${a.title} – ${a.price}`));
 
       latestAds = [...fresh, ...latestAds].slice(0, 30);
       fresh.forEach((a) => lastSeenUrls.set(a.url, now));
@@ -111,7 +124,7 @@ async function updateAds() {
       if (ts < cutoff) lastSeenUrls.delete(url);
     }
 
-    console.log("💾 Bekannte Anzeigen im Speicher:", lastSeenUrls.size);
+    console.log("💾 Bekannte Anzeigen:", lastSeenUrls.size);
     lastUpdate = now;
   } catch (err) {
     console.error("⚠️ Update-Fehler:", err.message);
@@ -120,7 +133,7 @@ async function updateAds() {
   }
 }
 
-// 🌍 API: Neueste Anzeigen
+// 🌍 API
 app.get("/crawl", async (req, res) => {
   try {
     if (latestAds.length === 0) await updateAds();
@@ -130,19 +143,18 @@ app.get("/crawl", async (req, res) => {
   }
 });
 
-// 💓 Healthcheck
+// 💓 Health
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.3 – Cookie+DOM Fix ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.4 – Scroll + Cookie Fix ✅)");
 });
 
 // 🕒 Intervall 10 Sek.
 setInterval(updateAds, 10000);
 
-// 🔁 Externer Ping hält Fly.io wach
+// 🔁 Fly warm halten
 async function autoPing() {
   try {
-    const url = "https://fahregut-auto-crawler.fly.dev/crawl";
-    const res = await axios.get(url);
+    const res = await axios.get("https://fahregut-auto-crawler.fly.dev/crawl");
     console.log("🔄 Live-Check:", res.data.length, "Anzeigen geladen");
   } catch (err) {
     console.log("⚠️ Auto-Update-Fehler:", err.message);
@@ -150,5 +162,6 @@ async function autoPing() {
 }
 setInterval(autoPing, 10000);
 
-console.log("🕒 Live-Auto-Update aktiv (Cookie-Fix + DOM-Check, alle 10 Sek.)");
-app.listen(PORT, () => console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.3 ✅`));
+app.listen(PORT, () =>
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.4 ✅`)
+);
