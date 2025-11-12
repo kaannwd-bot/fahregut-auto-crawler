@@ -1,9 +1,8 @@
-// 🚗 Fahregut Auto-Crawler – Version 7.5 (Chromium Path Fix ✅)
-// Fly.io + Puppeteer-Core + Chromium Integration + Scroll & Cookie Fix
+// 🚗 Fahregut Auto-Crawler – Version 7.6 (Fly Chromium Native ✅)
+// Puppeteer-Core + Chromium (System Installation)
 
 import express from "express";
 import puppeteer from "puppeteer-core";
-import chromium from "@sparticuz/chromium";
 import cors from "cors";
 import axios from "axios";
 
@@ -12,9 +11,6 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
-
-chromium.setHeadlessMode = true;
-chromium.setGraphicsMode = false;
 
 // 🧠 Speicher
 let latestAds = [];
@@ -26,22 +22,20 @@ let isUpdating = false;
 async function fetchAds(query = "") {
   console.log("🌍 Abruf gestartet:", query || "Alle Autos");
 
-  // 🔧 Sicheren Chromium-Pfad bestimmen
-  let executablePath;
-  try {
-    executablePath = await chromium.executablePath;
-    if (!executablePath || executablePath === "undefined") {
-      executablePath = "/usr/bin/chromium";
-    }
-  } catch {
-    executablePath = "/usr/bin/chromium";
-  }
+  // 🔧 Pfad zu systemweitem Chromium auf Fly.io
+  const executablePath = "/usr/bin/chromium-browser";
 
   const browser = await puppeteer.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
+    args: [
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--disable-setuid-sandbox",
+      "--disable-infobars",
+      "--window-size=1280,720",
+    ],
+    headless: true,
     executablePath,
-    headless: chromium.headless,
   });
 
   const page = await browser.newPage();
@@ -50,10 +44,7 @@ async function fetchAds(query = "") {
   )}/k0?sorting=date-desc`;
 
   try {
-    await page.goto(url, {
-      waitUntil: ["domcontentloaded", "networkidle2"],
-      timeout: 60000,
-    });
+    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
     // 🍪 Cookie-Banner schließen
     try {
@@ -65,7 +56,7 @@ async function fetchAds(query = "") {
       console.log("➡️ Kein Cookie-Banner gefunden (weiter).");
     }
 
-    // 🔄 Scrollen, um mehr Inserate zu laden
+    // 🔄 Scrollen für mehr Anzeigen
     await page.evaluate(async () => {
       for (let i = 0; i < 5; i++) {
         window.scrollBy(0, document.body.scrollHeight);
@@ -112,7 +103,6 @@ async function updateAds() {
 
     if (fresh.length > 0) {
       console.log(`🆕 ${fresh.length} neue Anzeigen gefunden!`);
-      fresh.forEach((a, i) => console.log(`  ${i + 1}. ${a.title} – ${a.price}`));
       latestAds = [...fresh, ...latestAds].slice(0, 30);
       fresh.forEach((a) => lastSeenUrls.set(a.url, now));
     } else {
@@ -124,7 +114,6 @@ async function updateAds() {
       if (ts < cutoff) lastSeenUrls.delete(url);
     }
 
-    console.log("💾 Bekannte Anzeigen:", lastSeenUrls.size);
     lastUpdate = now;
   } catch (err) {
     console.error("⚠️ Update-Fehler:", err.message);
@@ -145,23 +134,13 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Health
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.5 – Chromium Path Fix ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.6 – Fly Chromium Native ✅)");
 });
 
-// 🕒 Intervall 10 Sek.
+// 🔁 Warm halten
 setInterval(updateAds, 10000);
-
-// 🔁 Fly warm halten
-async function autoPing() {
-  try {
-    const res = await axios.get("https://fahregut-auto-crawler.fly.dev/crawl");
-    console.log("🔄 Live-Check:", res.data.length, "Anzeigen geladen");
-  } catch (err) {
-    console.log("⚠️ Auto-Update-Fehler:", err.message);
-  }
-}
-setInterval(autoPing, 10000);
+setInterval(() => axios.get("https://fahregut-auto-crawler.fly.dev/crawl").catch(() => {}), 10000);
 
 app.listen(PORT, () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.5 ✅`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.6 ✅`)
 );
