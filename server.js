@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 9.4 (Fly.io Stable + WS Heartbeat + Filter Persistenz)
+// 🚗 Fahregut Auto-Crawler – Version 9.5 (Fly.io Stable + WS Heartbeat + Auto-Recovery)
 // Puppeteer-Core + Chromium – 2025 Optimiert & Resilient
 
 import express from "express";
@@ -14,6 +14,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 const HEALTH_URL = process.env.HEALTH_URL || "https://fahregut-auto-crawler.fly.dev/health";
+const EXEC_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
 
 // 🧠 Speicher
 let seenUrls = new Set();
@@ -46,11 +47,16 @@ function parseKleinanzeigenTime(str) {
   return null;
 }
 
-// 🧭 Browser starten (einmalig, persistent)
-async function initBrowser() {
-  if (browser) return;
-  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
+// 🧭 Browser starten (mit Auto-Recovery)
+async function initBrowser(forceRestart = false) {
   try {
+    if (browser && !forceRestart) return;
+    if (browser) {
+      await browser.close().catch(() => {});
+      browser = null;
+    }
+
+    console.log("🧭 Starte Chromium...");
     browser = await puppeteer.launch({
       args: [
         "--no-sandbox",
@@ -58,18 +64,28 @@ async function initBrowser() {
         "--disable-dev-shm-usage",
         "--disable-setuid-sandbox",
         "--disable-infobars",
+        "--disable-software-rasterizer",
+        "--disable-extensions",
         "--window-size=1280,720",
         "--single-process",
-        "--no-zygote",
-        "--disable-software-rasterizer"
+        "--no-zygote"
       ],
       headless: true,
-      executablePath
+      executablePath: EXEC_PATH
     });
+
     page = await browser.newPage();
-    console.log("🧭 Browser geöffnet (persistent session).");
+    console.log("✅ Chromium erfolgreich gestartet.");
+
+    // Auto-close listener
+    browser.on("disconnected", async () => {
+      console.warn("⚠️ Chromium wurde unerwartet geschlossen. Neustart in 5s...");
+      await new Promise((r) => setTimeout(r, 5000));
+      await initBrowser(true);
+    });
   } catch (err) {
     console.error("❌ Browser konnte nicht gestartet werden:", err.message);
+    setTimeout(() => initBrowser(true), 10000);
   }
 }
 
@@ -135,7 +151,6 @@ async function fetchAds(filters = {}) {
       }
     } catch {}
 
-    // Scroll für Lazy Load
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
       await new Promise((r) => setTimeout(r, 400));
@@ -163,14 +178,9 @@ async function fetchAds(filters = {}) {
         })
     );
 
-    const sorted = ads
-      .map((a) => ({
-        ...a,
-        parsedDate: parseKleinanzeigenTime(a.time) || new Date(0)
-      }))
+    return ads
+      .map((a) => ({ ...a, parsedDate: parseKleinanzeigenTime(a.time) || new Date(0) }))
       .sort((a, b) => b.parsedDate - a.parsedDate);
-
-    return sorted;
   } catch (err) {
     console.error("⚠️ fetchAds Fehler:", err.message);
     return [];
@@ -220,13 +230,11 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (_, res) =>
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.4 – Fly.io Stable ✅)")
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.5 – Fly.io Stable ✅)")
 );
 
-// 🔁 Keepalive (Fly.io Ping)
-setInterval(() => {
-  axios.get(HEALTH_URL).catch(() => {});
-}, 60000);
+// 🔁 Keepalive
+setInterval(() => axios.get(HEALTH_URL).catch(() => {}), 60000);
 
 // 🧠 HTTP + WS
 const server = http.createServer(app);
@@ -244,7 +252,6 @@ wss.on("connection", (ws) => {
   ws.on("pong", heartbeat);
 
   console.log("📡 WS-Client verbunden");
-
   let filters = {};
 
   ws.send(JSON.stringify([{ title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." }]));
@@ -268,7 +275,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-// 🔄 WS-Ping alle 15s (Verbindung aktiv halten)
+// 🔄 WS-Ping alle 15s (Fly.io aktiv halten)
 setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
@@ -282,5 +289,5 @@ setInterval(() => updateAds({}), 6000);
 
 // 🚀 Start IPv4 + IPv6
 server.listen(PORT, ["0.0.0.0", "::"], () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 9.4 Stable ✅`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 9.5 Stable ✅`)
 );
