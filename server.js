@@ -1,19 +1,17 @@
-// 🚗 Fahregut Auto-Crawler – Version 7.4 (Scroll + Cookie Fix ✅)
-// Fly.io + Puppeteer-Core + Chromium Integration + Nur neue Inserate seit letztem Check
+// 🚗 Fahregut Auto-Crawler – Version 7.5 (Chromium Path Fix ✅)
+// Fly.io + Puppeteer-Core + Chromium Integration + Scroll & Cookie Fix
 
 import express from "express";
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import cors from "cors";
 import axios from "axios";
-import fs from "fs";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
-const CHROMIUM_PATH = await chromium.executablePath;
 
 chromium.setHeadlessMode = true;
 chromium.setGraphicsMode = false;
@@ -28,15 +26,25 @@ let isUpdating = false;
 async function fetchAds(query = "") {
   console.log("🌍 Abruf gestartet:", query || "Alle Autos");
 
+  // 🔧 Sicheren Chromium-Pfad bestimmen
+  let executablePath;
+  try {
+    executablePath = await chromium.executablePath;
+    if (!executablePath || executablePath === "undefined") {
+      executablePath = "/usr/bin/chromium";
+    }
+  } catch {
+    executablePath = "/usr/bin/chromium";
+  }
+
   const browser = await puppeteer.launch({
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
-    executablePath: CHROMIUM_PATH,
+    executablePath,
     headless: chromium.headless,
   });
 
   const page = await browser.newPage();
-
   const url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
     query
   )}/k0?sorting=date-desc`;
@@ -57,15 +65,14 @@ async function fetchAds(query = "") {
       console.log("➡️ Kein Cookie-Banner gefunden (weiter).");
     }
 
-    // ⏳ Scrollen, um dynamische Anzeigen zu laden
+    // 🔄 Scrollen, um mehr Inserate zu laden
     await page.evaluate(async () => {
       for (let i = 0; i < 5; i++) {
         window.scrollBy(0, document.body.scrollHeight);
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 800));
       }
     });
 
-    // ⏳ Warten bis Anzeigen sichtbar
     await page.waitForSelector("article.aditem, .aditem", { timeout: 15000 });
 
     const ads = await page.$$eval("article.aditem, .aditem", (items) =>
@@ -82,12 +89,6 @@ async function fetchAds(query = "") {
 
     console.log(`📦 ${ads.length} Anzeigen gefunden.`);
     if (ads[0]) console.log("🔍 Erste Anzeige:", ads[0].title);
-
-    // Screenshot (zur Fehlersuche)
-    if (ads.length === 0) {
-      await page.screenshot({ path: "/tmp/leer.png", fullPage: true });
-      console.log("📸 Screenshot gespeichert (leer.png) – keine Anzeigen erkannt.");
-    }
 
     await browser.close();
     return ads;
@@ -107,12 +108,11 @@ async function updateAds() {
   console.log("🔄 Suche nach neuesten Anzeigen...");
   try {
     const newAds = await fetchAds("");
-
     const fresh = newAds.filter((a) => a.url && !lastSeenUrls.has(a.url));
+
     if (fresh.length > 0) {
       console.log(`🆕 ${fresh.length} neue Anzeigen gefunden!`);
       fresh.forEach((a, i) => console.log(`  ${i + 1}. ${a.title} – ${a.price}`));
-
       latestAds = [...fresh, ...latestAds].slice(0, 30);
       fresh.forEach((a) => lastSeenUrls.set(a.url, now));
     } else {
@@ -145,7 +145,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Health
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.4 – Scroll + Cookie Fix ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.5 – Chromium Path Fix ✅)");
 });
 
 // 🕒 Intervall 10 Sek.
@@ -163,5 +163,5 @@ async function autoPing() {
 setInterval(autoPing, 10000);
 
 app.listen(PORT, () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.4 ✅`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.5 ✅`)
 );
