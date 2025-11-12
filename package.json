@@ -1,17 +1,21 @@
 {
   "name": "fahregut-auto-crawler",
-  "version": "1.0.0",
-  "description": "Live Kleinanzeigen Auto-Crawler für Fahregut.de (Fly.io + Puppeteer-Core + Chromium)",
+  "version": "9.2.0",
+  "description": "Live Kleinanzeigen Auto-Crawler für Fahregut.de (Fly.io + Puppeteer-Core + Chromium + WebSocket)",
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js",
+    "logs": "fly logs -a fahregut-auto-crawler",
+    "deploy": "fly deploy --local-only"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "puppeteer-core": "^22.8.0",
-    "axios": "^1.7.2",
-    "cors": "^2.8.5"
+    "express": "^4.19.2",
+    "puppeteer-core": "^22.8.2",
+    "axios": "^1.7.3",
+    "cors": "^2.8.5",
+    "ws": "^8.18.0"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -19,11 +23,15 @@
   "keywords": [
     "crawler",
     "puppeteer",
+    "puppeteer-core",
     "fly.io",
     "chromium",
     "auto",
     "scraper",
-    "realtime"
+    "realtime",
+    "websocket",
+    "express",
+    "fahregut"
   ],
   "author": "Fahregut.de",
   "license": "MIT"
