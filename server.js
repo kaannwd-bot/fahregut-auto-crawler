@@ -1,5 +1,5 @@
-// 🚗 Fahregut Auto-Crawler – Version 7.6 (Fly Chromium Native ✅)
-// Puppeteer-Core + Chromium (System Installation)
+// 🚗 Fahregut Auto-Crawler – Version 7.7 (Fly Chromium Stable ✅)
+// Puppeteer-Core + System Chromium (Fly.io Verified Build)
 
 import express from "express";
 import puppeteer from "puppeteer-core";
@@ -12,18 +12,18 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-// 🧠 Speicher
+// 🧠 Zwischenspeicher
 let latestAds = [];
 let lastSeenUrls = new Map();
 let lastUpdate = 0;
 let isUpdating = false;
 
-// 🚀 Anzeigen abrufen
+// 🚀 Funktion: Anzeigen abrufen
 async function fetchAds(query = "") {
   console.log("🌍 Abruf gestartet:", query || "Alle Autos");
 
-  // 🔧 Pfad zu systemweitem Chromium auf Fly.io
-  const executablePath = "/usr/bin/chromium-browser";
+  // ✅ KORRIGIERT: System-Chromium-Pfad (Fly.io = /usr/bin/chromium)
+  const executablePath = "/usr/bin/chromium";
 
   const browser = await puppeteer.launch({
     args: [
@@ -33,20 +33,22 @@ async function fetchAds(query = "") {
       "--disable-setuid-sandbox",
       "--disable-infobars",
       "--window-size=1280,720",
+      "--single-process",
+      "--no-zygote",
     ],
     headless: true,
     executablePath,
   });
 
-  const page = await browser.newPage();
-  const url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
-    query
-  )}/k0?sorting=date-desc`;
-
   try {
+    const page = await browser.newPage();
+    const url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(
+      query
+    )}/k0?sorting=date-desc`;
+
     await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
 
-    // 🍪 Cookie-Banner schließen
+    // 🍪 Cookie-Banner automatisch akzeptieren
     try {
       await page.waitForSelector('button[aria-label="Alle akzeptieren"]', { timeout: 7000 });
       await page.click('button[aria-label="Alle akzeptieren"]');
@@ -56,9 +58,9 @@ async function fetchAds(query = "") {
       console.log("➡️ Kein Cookie-Banner gefunden (weiter).");
     }
 
-    // 🔄 Scrollen für mehr Anzeigen
+    // 🔄 Scrollen (mehr Anzeigen laden)
     await page.evaluate(async () => {
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 4; i++) {
         window.scrollBy(0, document.body.scrollHeight);
         await new Promise((r) => setTimeout(r, 800));
       }
@@ -90,7 +92,7 @@ async function fetchAds(query = "") {
   }
 }
 
-// 🔁 Realtime Update
+// 🔁 Realtime-Update
 async function updateAds() {
   const now = Date.now();
   if (isUpdating || now - lastUpdate < 10000) return;
@@ -109,6 +111,7 @@ async function updateAds() {
       console.log("🟢 Keine neuen Inserate seit letztem Check.");
     }
 
+    // Alte löschen (>12h)
     const cutoff = now - 12 * 60 * 60 * 1000;
     for (const [url, ts] of lastSeenUrls.entries()) {
       if (ts < cutoff) lastSeenUrls.delete(url);
@@ -122,7 +125,7 @@ async function updateAds() {
   }
 }
 
-// 🌍 API
+// 🌍 API-Route
 app.get("/crawl", async (req, res) => {
   try {
     if (latestAds.length === 0) await updateAds();
@@ -132,15 +135,20 @@ app.get("/crawl", async (req, res) => {
   }
 });
 
-// 💓 Health
+// 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.6 – Fly Chromium Native ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.7 – Fly Chromium Stable ✅)");
 });
 
-// 🔁 Warm halten
+// 🕒 Intervall
 setInterval(updateAds, 10000);
-setInterval(() => axios.get("https://fahregut-auto-crawler.fly.dev/crawl").catch(() => {}), 10000);
 
-app.listen(PORT, () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.6 ✅`)
-);
+// 🔁 Fly wach halten
+setInterval(() => {
+  axios.get("https://fahregut-auto-crawler.fly.dev/crawl").catch(() => {});
+}, 10000);
+
+// 🌐 Server starten
+app.listen(PORT, () => {
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.7 ✅`);
+});
