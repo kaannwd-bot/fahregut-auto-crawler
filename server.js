@@ -1,5 +1,5 @@
-// 🚗 Fahregut Auto-Crawler – Version 9.2 (Fly.io Stable + WS Heartbeat + Filter Persistenz)
-// Puppeteer-Core + Chromium – 2025 Stable
+// 🚗 Fahregut Auto-Crawler – Version 9.3 (Fly.io Stable + WS Heartbeat + Filter Persistenz)
+// Puppeteer-Core + Chromium – 2025 Optimiert
 
 import express from "express";
 import puppeteer from "puppeteer-core";
@@ -21,7 +21,7 @@ let isUpdating = false;
 let browser = null;
 let page = null;
 
-// 🔍 Zeitparser Kleinanzeigen
+// 🕒 Zeitparser Kleinanzeigen
 function parseKleinanzeigenTime(str) {
   if (!str) return null;
   const now = new Date();
@@ -67,7 +67,7 @@ async function initBrowser() {
   console.log("🧭 Browser geöffnet (persistent session).");
 }
 
-// 🔗 URL Builder für Filter
+// 🔗 Filterbasierte Such-URL
 function buildSearchUrl(filters = {}) {
   const {
     marke = "",
@@ -129,6 +129,7 @@ async function fetchAds(filters = {}) {
       }
     } catch {}
 
+    // Scroll leicht nach unten (Lazy Load)
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
       await new Promise((r) => setTimeout(r, 400));
@@ -174,7 +175,7 @@ async function fetchAds(filters = {}) {
 // 🔁 Live-Update
 async function updateAds(filters = {}) {
   const now = Date.now();
-  if (isUpdating || now - lastUpdate < 3000) return [];
+  if (isUpdating || now - lastUpdate < 4000) return [];
   isUpdating = true;
 
   try {
@@ -187,7 +188,10 @@ async function updateAds(filters = {}) {
       [...clients].forEach((ws) => {
         if (ws.readyState === 1) ws.send(JSON.stringify(fresh));
       });
-    } else console.log("🟢 Keine neuen Anzeigen.");
+    } else {
+      console.log("🟢 Keine neuen Anzeigen.");
+    }
+
     lastUpdate = now;
     return fresh;
   } catch (err) {
@@ -211,20 +215,20 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (_, res) =>
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.2 – WS Stabil ✅)")
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.3 – Fly.io Stable ✅)")
 );
 
-// 🔁 Keepalive
+// 🔁 Keepalive (Fly.io Ping)
 setInterval(() => {
   axios.get("https://fahregut-auto-crawler.fly.dev/health").catch(() => {});
-}, 20000);
+}, 60000);
 
 // 🧠 HTTP + WS
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const clients = new Set();
 
-// 💓 Heartbeat Funktion
+// 💓 WS Heartbeat
 function heartbeat() {
   this.isAlive = true;
 }
@@ -236,14 +240,9 @@ wss.on("connection", (ws, req) => {
 
   console.log("📡 WS-Client verbunden");
 
-  // Filter-Objekt pro Verbindung speichern
   let filters = {};
 
-  ws.send(
-    JSON.stringify([
-      { title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." },
-    ])
-  );
+  ws.send(JSON.stringify([{ title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." }]));
 
   ws.on("message", (msg) => {
     try {
@@ -251,7 +250,6 @@ wss.on("connection", (ws, req) => {
       if (data.type === "filter") {
         filters = { ...data };
         console.log("🎯 Neue Filter erhalten:", filters);
-        // Sofortige Abfrage
         updateAds(filters);
       }
     } catch (e) {
@@ -265,7 +263,7 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-// 🔄 WS Ping alle 15 Sekunden (Fly.io aktiv halten)
+// 🔄 WS-Ping alle 15s (Verbindung aktiv halten)
 setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
@@ -277,7 +275,7 @@ setInterval(() => {
 // 🔄 Dauer-Update alle 6 Sekunden
 setInterval(() => updateAds({}), 6000);
 
-// 🚀 Start IPv4+IPv6
+// 🚀 Start IPv4 + IPv6
 server.listen(PORT, ["0.0.0.0", "::"], () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – v9.2 Stable ✅`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 9.3 Stable ✅`)
 );
