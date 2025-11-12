@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 9.0 (Full Filter Support + Fly.io Single-Port WS)
+// 🚗 Fahregut Auto-Crawler – Version 9.2 (Fly.io Stable + WS Heartbeat + Filter Persistenz)
 // Puppeteer-Core + Chromium – 2025 Stable
 
 import express from "express";
@@ -93,41 +93,19 @@ function buildSearchUrl(filters = {}) {
   let query = [marke, modell].filter(Boolean).join(" ");
   let url = `https://www.kleinanzeigen.de/s-autos/${encodeURIComponent(query)}/k0?sorting=date-desc`;
 
-  // Preis
-  if (preis_von || preis_bis)
-    url += `&price=${preis_von || 0}:${preis_bis || ""}`;
-  // Kilometer
+  if (preis_von || preis_bis) url += `&price=${preis_von || 0}:${preis_bis || ""}`;
   if (km_von || km_bis) url += `&mileage=${km_von || 0}:${km_bis || ""}`;
-  // Erstzulassung
-  if (ez_von || ez_bis)
-    url += `&firstRegistrationDate=${ez_von || 0}:${ez_bis || ""}`;
-  // Leistung
+  if (ez_von || ez_bis) url += `&firstRegistrationDate=${ez_von || 0}:${ez_bis || ""}`;
   if (ps_von || ps_bis) url += `&power=${ps_von || 0}:${ps_bis || ""}`;
-  // Kraftstoff
-  if (kraftstoff)
-    url += `&fuel=${encodeURIComponent(kraftstoff.toLowerCase())}`;
-  // Getriebe
-  if (getriebe)
-    url += `&transmission=${encodeURIComponent(getriebe.toLowerCase())}`;
-  // Zustand
+  if (kraftstoff) url += `&fuel=${encodeURIComponent(kraftstoff.toLowerCase())}`;
+  if (getriebe) url += `&transmission=${encodeURIComponent(getriebe.toLowerCase())}`;
   if (zustand.includes("Unbesch")) url += "&condition=unbeschädigt";
   if (zustand.includes("Besch")) url += "&condition=beschädigt";
-  // Typ
   if (typ) url += `&carType=${encodeURIComponent(typ.toLowerCase())}`;
-  // Farbe
   if (farbe) url += `&color=${encodeURIComponent(farbe.toLowerCase())}`;
-  // Anbieter
-  if (anbieter)
-    url +=
-      anbieter === "Privat"
-        ? "&adType=private"
-        : "&adType=business";
-  // Angebotstyp
-  if (angebot)
-    url += angebot === "Gesuch" ? "&offerType=search" : "&offerType=sell";
-  // Ort / Bundesland (Filter nur symbolisch, Kleinanzeigen nutzt PLZ/Geo)
-  if (bundesland)
-    url += `&geo=${encodeURIComponent(bundesland.toLowerCase())}`;
+  if (anbieter) url += anbieter === "Privat" ? "&adType=private" : "&adType=business";
+  if (angebot) url += angebot === "Gesuch" ? "&offerType=search" : "&offerType=sell";
+  if (bundesland) url += `&geo=${encodeURIComponent(bundesland.toLowerCase())}`;
 
   return url;
 }
@@ -151,7 +129,6 @@ async function fetchAds(filters = {}) {
       }
     } catch {}
 
-    // Scroll
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
       await new Promise((r) => setTimeout(r, 400));
@@ -169,19 +146,13 @@ async function fetchAds(filters = {}) {
             item.querySelector("h2")?.textContent.trim() ||
             "Kein Titel";
           const price =
-            item.querySelector(".aditem-main--middle--price-shipping--price")
-              ?.textContent.trim() || "";
-          const location =
-            item.querySelector(".aditem-main--top--left")?.textContent.trim() ||
-            "";
-          const time =
-            item.querySelector(".aditem-main--top--right")?.textContent.trim() ||
-            "";
+            item.querySelector(".aditem-main--middle--price-shipping--price")?.textContent.trim() || "";
+          const location = item.querySelector(".aditem-main--top--left")?.textContent.trim() || "";
+          const time = item.querySelector(".aditem-main--top--right")?.textContent.trim() || "";
           const image = item.querySelector("img")?.src || "";
           const url = item.querySelector("a")?.href || "";
           const details =
-            item.querySelector(".aditem-main--middle--description")
-              ?.textContent.trim() || "";
+            item.querySelector(".aditem-main--middle--description")?.textContent.trim() || "";
           return { title, price, location, image, url, details, time };
         })
     );
@@ -203,7 +174,7 @@ async function fetchAds(filters = {}) {
 // 🔁 Live-Update
 async function updateAds(filters = {}) {
   const now = Date.now();
-  if (isUpdating || now - lastUpdate < 2000) return [];
+  if (isUpdating || now - lastUpdate < 3000) return [];
   isUpdating = true;
 
   try {
@@ -214,8 +185,7 @@ async function updateAds(filters = {}) {
     if (fresh.length > 0) {
       console.log(`🆕 ${fresh.length} neue Anzeigen.`);
       [...clients].forEach((ws) => {
-        if (ws.readyState === 1)
-          ws.send(JSON.stringify(fresh));
+        if (ws.readyState === 1) ws.send(JSON.stringify(fresh));
       });
     } else console.log("🟢 Keine neuen Anzeigen.");
     lastUpdate = now;
@@ -241,7 +211,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (_, res) =>
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.0 – Full Filter WS ✅)")
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.2 – WS Stabil ✅)")
 );
 
 // 🔁 Keepalive
@@ -254,24 +224,39 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const clients = new Set();
 
+// 💓 Heartbeat Funktion
+function heartbeat() {
+  this.isAlive = true;
+}
+
 wss.on("connection", (ws, req) => {
   clients.add(ws);
+  ws.isAlive = true;
+  ws.on("pong", heartbeat);
+
   console.log("📡 WS-Client verbunden");
 
-  // 🔍 URL params + message listener
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  let filters = Object.fromEntries(url.searchParams.entries());
+  // Filter-Objekt pro Verbindung speichern
+  let filters = {};
 
-  ws.send(JSON.stringify([{ title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." }]));
+  ws.send(
+    JSON.stringify([
+      { title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." },
+    ])
+  );
 
   ws.on("message", (msg) => {
     try {
       const data = JSON.parse(msg.toString());
       if (data.type === "filter") {
-        filters = { ...filters, ...data };
+        filters = { ...data };
         console.log("🎯 Neue Filter erhalten:", filters);
+        // Sofortige Abfrage
+        updateAds(filters);
       }
-    } catch {}
+    } catch (e) {
+      console.error("❌ WS parse error:", e.message);
+    }
   });
 
   ws.on("close", () => {
@@ -280,10 +265,19 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-// 🔄 Dauer-Update
-setInterval(() => updateAds({}), 2000);
+// 🔄 WS Ping alle 15 Sekunden (Fly.io aktiv halten)
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 15000);
+
+// 🔄 Dauer-Update alle 6 Sekunden
+setInterval(() => updateAds({}), 6000);
 
 // 🚀 Start IPv4+IPv6
 server.listen(PORT, ["0.0.0.0", "::"], () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – HTTP + WS aktiv ✅`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – v9.2 Stable ✅`)
 );
