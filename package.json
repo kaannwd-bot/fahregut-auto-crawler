@@ -1,6 +1,6 @@
 {
   "name": "fahregut-auto-crawler",
-  "version": "9.3.1",
+  "version": "9.3.2",
   "description": "Live Kleinanzeigen Auto-Crawler für Fahregut.de (Fly.io + Puppeteer-Core + Chromium + WebSocket + Heartbeat + Healthcheck)",
   "main": "server.js",
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "puppeteer-core": "22.8.2",
+    "puppeteer-core": "21.3.8",
     "axios": "^1.7.3",
     "cors": "^2.8.5",
     "ws": "^8.18.0"
