@@ -1,4 +1,4 @@
-// 🚗 Fahregut Auto-Crawler – Version 7.7 (Fly Chromium Stable ✅)
+// 🚗 Fahregut Auto-Crawler – Version 7.8 (Fly Chromium Full Compatible ✅)
 // Puppeteer-Core + System Chromium (Fly.io Verified Build)
 
 import express from "express";
@@ -22,7 +22,6 @@ let isUpdating = false;
 async function fetchAds(query = "") {
   console.log("🌍 Abruf gestartet:", query || "Alle Autos");
 
-  // ✅ KORRIGIERT: System-Chromium-Pfad (Fly.io = /usr/bin/chromium)
   const executablePath = "/usr/bin/chromium";
 
   const browser = await puppeteer.launch({
@@ -66,18 +65,34 @@ async function fetchAds(query = "") {
       }
     });
 
-    await page.waitForSelector("article.aditem, .aditem", { timeout: 15000 });
+    // 🕒 Auf Anzeige warten
+    await page.waitForSelector("article.aditem, .aditem--featured, .aditem--galleryitem", { timeout: 15000 });
 
-    const ads = await page.$$eval("article.aditem, .aditem", (items) =>
-      items.slice(0, 20).map((item) => {
-        const title = item.querySelector(".aditem-main--middle--title")?.innerText.trim();
-        const price = item.querySelector(".aditem-main--middle--price-shipping--price")?.innerText.trim();
-        const location = item.querySelector(".aditem-main--top--left")?.innerText.trim();
-        const image = item.querySelector("img")?.src || "";
-        const url = item.querySelector("a")?.href || "";
-        const details = item.querySelector(".aditem-main--middle--description")?.innerText.trim();
-        return { title, price, location, image, url, details };
-      })
+    // 📦 Alle Varianten (inkl. Featured + Gallery)
+    const ads = await page.$$eval(
+      "article.aditem, .aditem--featured, .aditem--galleryitem",
+      (items) =>
+        items.slice(0, 30).map((item) => {
+          const titleEl = item.querySelector(".aditem-main--middle--title");
+          const title = titleEl ? titleEl.textContent.trim() : "Unbekanntes Fahrzeug";
+
+          const priceEl = item.querySelector(".aditem-main--middle--price-shipping--price");
+          const price = priceEl ? priceEl.textContent.trim() : "";
+
+          const locationEl = item.querySelector(".aditem-main--top--left");
+          const location = locationEl ? locationEl.textContent.trim() : "";
+
+          const imageEl = item.querySelector("img");
+          const image = imageEl ? imageEl.src : "";
+
+          const urlEl = item.querySelector("a");
+          const url = urlEl ? urlEl.href : "";
+
+          const detailsEl = item.querySelector(".aditem-main--middle--description");
+          const details = detailsEl ? detailsEl.textContent.trim() : "";
+
+          return { title, price, location, image, url, details };
+        })
     );
 
     console.log(`📦 ${ads.length} Anzeigen gefunden.`);
@@ -105,7 +120,7 @@ async function updateAds() {
 
     if (fresh.length > 0) {
       console.log(`🆕 ${fresh.length} neue Anzeigen gefunden!`);
-      latestAds = [...fresh, ...latestAds].slice(0, 30);
+      latestAds = [...fresh, ...latestAds].slice(0, 40);
       fresh.forEach((a) => lastSeenUrls.set(a.url, now));
     } else {
       console.log("🟢 Keine neuen Inserate seit letztem Check.");
@@ -125,21 +140,19 @@ async function updateAds() {
   }
 }
 
-// --- API ---
+// 🌍 API-Route
 app.get("/crawl", async (req, res) => {
   try {
-    if (latestAds.length === 0) {
-      await updateAds(); // ilk istek boşsa tetikle
-    }
+    if (latestAds.length === 0) await updateAds();
     res.json(latestAds);
-  } catch (e) {
-    res.status(500).json({ error: "Crawler-Fehler", details: e.message });
+  } catch (err) {
+    res.status(500).json({ error: "Crawler-Fehler", details: err.message });
   }
 });
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.7 – Fly Chromium Stable ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 7.8 – Full Compatible ✅)");
 });
 
 // 🕒 Intervall
@@ -152,5 +165,5 @@ setInterval(() => {
 
 // 🌐 Server starten
 app.listen(PORT, () => {
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.7 ✅`);
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 7.8 ✅`);
 });
