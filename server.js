@@ -125,12 +125,33 @@ async function updateAds() {
   }
 }
 
-// 🌍 API-Route
+// 🌍 API-Route mit Filtern
 app.get("/crawl", async (req, res) => {
   try {
-    if (latestAds.length === 0) await updateAds();
-    res.json(latestAds);
+    // 🧩 Alle Filterparameter aus der URL
+    const {
+      marke = "",
+      modell = "",
+      plz = "",
+      preis_von = "",
+      preis_bis = "",
+      kraftstoff = "",
+      getriebe = "",
+    } = req.query;
+
+    // 🔎 Suchbegriff aufbauen
+    let query = [marke, modell].filter(Boolean).join(" ");
+    if (kraftstoff && kraftstoff !== "Alle") query += " " + kraftstoff;
+    if (getriebe && getriebe !== "Alle") query += " " + getriebe;
+    if (plz) query += " " + plz;
+    if (preis_von || preis_bis) query += ` ${preis_von}-${preis_bis}`;
+
+    console.log("🧩 Suchbegriff (kombiniert):", query);
+
+    const newAds = await fetchAds(query);
+    res.json(newAds);
   } catch (err) {
+    console.error("⚠️ Fehler bei /crawl:", err.message);
     res.status(500).json({ error: "Crawler-Fehler", details: err.message });
   }
 });
