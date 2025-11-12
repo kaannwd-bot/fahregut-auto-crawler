@@ -1,8 +1,13 @@
-# 🚀 Fahregut Auto-Crawler Dockerfile – Chromium + Puppeteer-Core (Fly.io Stable Build)
-FROM node:20-slim
+# -------------------------------------------------------------
+# 🚀 Fahregut Auto-Crawler Dockerfile – Optimized Multi-Layer
+# Chromium + Puppeteer-Core (Fly.io Fast Build)
+# -------------------------------------------------------------
 
-# System-Updates und benötigte Pakete
-RUN apt-get update && apt-get install -y \
+# 🧱 Stage 1: System layer (Chromium & dependencies)
+FROM debian:bookworm-slim AS chromium-base
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     chromium \
     ca-certificates \
     fonts-liberation \
@@ -21,35 +26,44 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     xdg-utils \
     wget \
-    locales \
-    && rm -rf /var/lib/apt/lists/*
+    locales && \
+    sed -i '/de_DE.UTF-8/s/^# //g' /etc/locale.gen && locale-gen && \
+    rm -rf /var/lib/apt/lists/*
 
-# UTF-8 Locale aktivieren (für Kleinanzeigen.de mit Umlauten)
-RUN sed -i '/de_DE.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=de_DE.UTF-8
 ENV LANGUAGE=de_DE:de
 ENV LC_ALL=de_DE.UTF-8
 
+# -------------------------------------------------------------
+# ⚙️ Stage 2: Node.js runtime
+FROM node:20-slim
+
+# Chromium & libs from base layer (cached)
+COPY --from=chromium-base /usr/bin/chromium /usr/bin/chromium
+COPY --from=chromium-base /usr/lib /usr/lib
+COPY --from=chromium-base /lib /lib
+COPY --from=chromium-base /usr/share/locale /usr/share/locale
+
 # Arbeitsverzeichnis
 WORKDIR /app
 
-# Nur package.json zuerst kopieren (Cache-Vorteil)
+# Nur package.json zuerst (cache-vorteil)
 COPY package*.json ./
 RUN npm install --omit=dev
 
 # Projektdateien
 COPY . .
 
-# Chromium-Pfad für Puppeteer-Core
+# Environment
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
 ENV PORT=8080
-
-# Fly.io erwartet SIGTERM → korrektes Shutdown-Verhalten aktivieren
 STOPSIGNAL SIGTERM
 
-# Port öffnen
 EXPOSE 8080
 
-# Startkommando
+# Healthcheck (Fly.io)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -fs http://localhost:8080/health || exit 1
+
 CMD ["node", "server.js"]
