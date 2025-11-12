@@ -1,5 +1,5 @@
-// 🚗 Fahregut Auto-Crawler – Version 8.8 (Single-Port WebSocket + Instant Push + Perfect Sorting ✅)
-// Puppeteer-Core + System Chromium (Fly.io Fully Compatible Build)
+// 🚗 Fahregut Auto-Crawler – Version 8.9 (Fly.io Single-Port WebSocket Fix ✅)
+// Puppeteer-Core + System Chromium – 2025 Stable Build
 
 import express from "express";
 import puppeteer from "puppeteer-core";
@@ -14,7 +14,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-// 🧠 Speicher (nur neue Anzeigen)
+// 🧠 Bellek (yeni ilanlar için)
 let seenUrls = new Set();
 let lastUpdate = 0;
 let isUpdating = false;
@@ -69,7 +69,7 @@ async function initBrowser() {
   console.log("🧭 Browser geöffnet (persistent session).");
 }
 
-// 🚀 İlanları çek (tek sayfa reload)
+// 🚀 İlanları çek
 async function fetchAds(filters = {}) {
   await initBrowser();
   const { marke = "", modell = "", preis_von = "", preis_bis = "" } = filters;
@@ -82,7 +82,6 @@ async function fetchAds(filters = {}) {
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
 
-    // 🍪 Cookie banner
     try {
       const cookie = await page.$('button[aria-label="Alle akzeptieren"]');
       if (cookie) {
@@ -92,17 +91,16 @@ async function fetchAds(filters = {}) {
       }
     } catch {}
 
-    // 🔄 Scroll (daha fazla ilan)
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 400));
     }
 
     await page.waitForSelector("article.aditem", { timeout: 15000 });
 
     const ads = await page.$$eval("article.aditem", (items) =>
       items
-        .filter((i) => !i.className.includes("featured")) // sponsorları atla
+        .filter((i) => !i.className.includes("featured"))
         .slice(0, 50)
         .map((item) => {
           const title =
@@ -121,7 +119,6 @@ async function fetchAds(filters = {}) {
         })
     );
 
-    // 🔄 Tarihe göre sıralama (yeni → eski)
     const sortedAds = ads
       .map((a) => ({ ...a, parsedDate: parseKleinanzeigenTime(a.time) || new Date(0) }))
       .sort((a, b) => b.parsedDate - a.parsedDate);
@@ -133,10 +130,10 @@ async function fetchAds(filters = {}) {
   }
 }
 
-// 🔁 Yalnızca yeni ilanları getir (her 3 saniye)
+// 🔁 Yeni ilanları getir (2 saniyede bir)
 async function updateAds(filters = {}) {
   const now = Date.now();
-  if (isUpdating || now - lastUpdate < 3000) return [];
+  if (isUpdating || now - lastUpdate < 2000) return [];
   isUpdating = true;
 
   try {
@@ -146,12 +143,13 @@ async function updateAds(filters = {}) {
 
     if (fresh.length > 0) {
       console.log(`🆕 ${fresh.length} neue Anzeigen gefunden.`);
-      // WebSocket Push
-      for (const client of clients) {
-        if (client.readyState === 1) {
-          client.send(JSON.stringify(fresh));
+      [...clients].forEach((client) => {
+        try {
+          if (client.readyState === 1) client.send(JSON.stringify(fresh));
+        } catch (err) {
+          console.warn("WS Send Error:", err.message);
         }
-      }
+      });
     } else {
       console.log("🟢 Keine neuen Anzeigen.");
     }
@@ -166,7 +164,7 @@ async function updateAds(filters = {}) {
   }
 }
 
-// 🌍 API: manuel tetikleme
+// 🌍 API
 app.get("/crawl", async (req, res) => {
   try {
     const filters = req.query || {};
@@ -179,10 +177,10 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.8 – Single-Port WebSocket ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.9 – Fly.io Single-Port WebSocket ✅)");
 });
 
-// 🔁 Keepalive (Fly)
+// 🔁 Keepalive (Fly.io)
 setInterval(() => {
   axios.get("https://fahregut-auto-crawler.fly.dev/health").catch(() => {});
 }, 20000);
@@ -202,10 +200,10 @@ wss.on("connection", (ws) => {
   });
 });
 
-// 🔄 Sürekli kontrol (her 3 saniye)
-setInterval(() => updateAds({}), 3000);
+// 🔄 Sürekli kontrol
+setInterval(() => updateAds({}), 2000);
 
-// 🚀 Start
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚗 Server läuft auf Port ${PORT} – WebSocket + HTTP aktiv ✅`);
+// 🚀 Start (hem IPv4 hem IPv6 için)
+server.listen(PORT, ["0.0.0.0", "::"], () => {
+  console.log(`🚗 Server läuft auf 0.0.0.0:${PORT} – HTTP + WS aktiv ✅`);
 });
