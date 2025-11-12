@@ -1,5 +1,5 @@
-// 🚗 Fahregut Auto-Crawler – Version 9.3 (Fly.io Stable + WS Heartbeat + Filter Persistenz)
-// Puppeteer-Core + Chromium – 2025 Optimiert
+// 🚗 Fahregut Auto-Crawler – Version 9.4 (Fly.io Stable + WS Heartbeat + Filter Persistenz)
+// Puppeteer-Core + Chromium – 2025 Optimiert & Resilient
 
 import express from "express";
 import puppeteer from "puppeteer-core";
@@ -13,6 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
+const HEALTH_URL = process.env.HEALTH_URL || "https://fahregut-auto-crawler.fly.dev/health";
 
 // 🧠 Speicher
 let seenUrls = new Set();
@@ -45,26 +46,31 @@ function parseKleinanzeigenTime(str) {
   return null;
 }
 
-// 🧭 Browser starten
+// 🧭 Browser starten (einmalig, persistent)
 async function initBrowser() {
   if (browser) return;
-  const executablePath = "/usr/bin/chromium";
-  browser = await puppeteer.launch({
-    args: [
-      "--no-sandbox",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--disable-setuid-sandbox",
-      "--disable-infobars",
-      "--window-size=1280,720",
-      "--single-process",
-      "--no-zygote",
-    ],
-    headless: true,
-    executablePath,
-  });
-  page = await browser.newPage();
-  console.log("🧭 Browser geöffnet (persistent session).");
+  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
+  try {
+    browser = await puppeteer.launch({
+      args: [
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--disable-infobars",
+        "--window-size=1280,720",
+        "--single-process",
+        "--no-zygote",
+        "--disable-software-rasterizer"
+      ],
+      headless: true,
+      executablePath
+    });
+    page = await browser.newPage();
+    console.log("🧭 Browser geöffnet (persistent session).");
+  } catch (err) {
+    console.error("❌ Browser konnte nicht gestartet werden:", err.message);
+  }
 }
 
 // 🔗 Filterbasierte Such-URL
@@ -87,7 +93,7 @@ function buildSearchUrl(filters = {}) {
     farbe = "",
     bundesland = "",
     anbieter = "",
-    angebot = "",
+    angebot = ""
   } = filters;
 
   let query = [marke, modell].filter(Boolean).join(" ");
@@ -129,7 +135,7 @@ async function fetchAds(filters = {}) {
       }
     } catch {}
 
-    // Scroll leicht nach unten (Lazy Load)
+    // Scroll für Lazy Load
     for (let i = 0; i < 3; i++) {
       await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
       await new Promise((r) => setTimeout(r, 400));
@@ -152,8 +158,7 @@ async function fetchAds(filters = {}) {
           const time = item.querySelector(".aditem-main--top--right")?.textContent.trim() || "";
           const image = item.querySelector("img")?.src || "";
           const url = item.querySelector("a")?.href || "";
-          const details =
-            item.querySelector(".aditem-main--middle--description")?.textContent.trim() || "";
+          const details = item.querySelector(".aditem-main--middle--description")?.textContent.trim() || "";
           return { title, price, location, image, url, details, time };
         })
     );
@@ -161,7 +166,7 @@ async function fetchAds(filters = {}) {
     const sorted = ads
       .map((a) => ({
         ...a,
-        parsedDate: parseKleinanzeigenTime(a.time) || new Date(0),
+        parsedDate: parseKleinanzeigenTime(a.time) || new Date(0)
       }))
       .sort((a, b) => b.parsedDate - a.parsedDate);
 
@@ -215,12 +220,12 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (_, res) =>
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.3 – Fly.io Stable ✅)")
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.4 – Fly.io Stable ✅)")
 );
 
 // 🔁 Keepalive (Fly.io Ping)
 setInterval(() => {
-  axios.get("https://fahregut-auto-crawler.fly.dev/health").catch(() => {});
+  axios.get(HEALTH_URL).catch(() => {});
 }, 60000);
 
 // 🧠 HTTP + WS
@@ -233,7 +238,7 @@ function heartbeat() {
   this.isAlive = true;
 }
 
-wss.on("connection", (ws, req) => {
+wss.on("connection", (ws) => {
   clients.add(ws);
   ws.isAlive = true;
   ws.on("pong", heartbeat);
@@ -277,5 +282,5 @@ setInterval(() => updateAds({}), 6000);
 
 // 🚀 Start IPv4 + IPv6
 server.listen(PORT, ["0.0.0.0", "::"], () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 9.3 Stable ✅`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 9.4 Stable ✅`)
 );
