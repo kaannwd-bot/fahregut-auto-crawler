@@ -1,16 +1,18 @@
-// 🚗 Fahregut Auto-Crawler – Version 8.5 (Realtime + Instant Update + Perfect Sorting ✅)
+// 🚗 Fahregut Auto-Crawler – Version 8.7 (Realtime + WebSocket Push + Perfect Sorting ✅)
 // Puppeteer-Core + System Chromium (Fly.io Verified Build)
 
 import express from "express";
 import puppeteer from "puppeteer-core";
 import cors from "cors";
 import axios from "axios";
+import { WebSocketServer } from "ws";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
+const WS_PORT = 8081; // WebSocket port
 
 // 🧠 Speicher (nur neue Anzeigen)
 let seenUrls = new Set();
@@ -134,6 +136,21 @@ async function fetchAds(filters = {}) {
   }
 }
 
+// 🧠 WebSocket Setup
+const wss = new WebSocketServer({ port: WS_PORT });
+let clients = new Set();
+
+wss.on("connection", (ws, req) => {
+  const params = new URLSearchParams(req.url.split("?")[1]);
+  clients.add({ ws, params });
+  console.log("📡 Neuer WS-Client verbunden");
+  ws.send(JSON.stringify([{ title: "✅ Live verbunden", details: "Warte auf neue Anzeigen ..." }]));
+  ws.on("close", () => {
+    clients.delete(ws);
+    console.log("❌ WS-Client getrennt");
+  });
+});
+
 // 🔁 Yalnızca yeni ilanları getir (her 5 saniye)
 async function updateAds(filters = {}) {
   const now = Date.now();
@@ -143,10 +160,20 @@ async function updateAds(filters = {}) {
   try {
     const allAds = await fetchAds(filters);
     const fresh = allAds.filter((a) => a.url && !seenUrls.has(a.url));
-
     fresh.forEach((a) => seenUrls.add(a.url));
 
-    console.log(`🆕 ${fresh.length} neue Anzeigen gefunden.`);
+    if (fresh.length > 0) {
+      console.log(`🆕 ${fresh.length} neue Anzeigen gefunden.`);
+      // WebSocket Push
+      for (const client of clients) {
+        if (client.ws.readyState === 1) {
+          client.ws.send(JSON.stringify(fresh));
+        }
+      }
+    } else {
+      console.log("🟢 Keine neuen Anzeigen.");
+    }
+
     lastUpdate = now;
     return fresh;
   } catch (err) {
@@ -170,7 +197,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (req, res) => {
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.5 – Realtime + Instant Update ✅)");
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 8.7 – WebSocket Push ✅)");
 });
 
 // 🔁 Keepalive (Fly)
@@ -180,5 +207,5 @@ setInterval(() => {
 
 // 🚀 Start
 app.listen(PORT, () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 8.5 ✅`)
+  console.log(`🚗 HTTP läuft auf Port ${PORT}, WebSocket auf ${WS_PORT} – Version 8.7 ✅`)
 );
