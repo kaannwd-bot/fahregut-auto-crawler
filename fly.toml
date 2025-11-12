@@ -1,5 +1,9 @@
+# 🚀 Fly.io Config – Fahregut Auto-Crawler (Chromium + WebSocket)
 app = "fahregut-auto-crawler"
 primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
 
 [env]
   PORT = "8080"
@@ -8,14 +12,46 @@ primary_region = "fra"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_start_machines = false
-  auto_stop_machines = true
-  min_machines_running = 0
+  auto_start_machines = true       # automatisch starten bei Traffic
+  auto_stop_machines = true        # stoppt bei Inaktivität (spart Ressourcen)
+  min_machines_running = 1         # hält immer 1 Instanz aktiv
+  concurrency = { type = "requests", hard_limit = 100, soft_limit = 80 }
 
+  [http_service.http_options]
+    response_headers = { X-Frame-Options = "DENY", X-Content-Type-Options = "nosniff" }
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "10s"
+    restart_limit = 5
+
+# 🔍 Healthcheck – prüft /health Endpoint
+[[checks]]
+  type = "http"
+  name = "auto-health"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "15s"
+  path = "/health"
+  method = "get"
+  protocol = "http"
+
+# 🧠 VM-Konfiguration
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory = "2gb"
-
-[build]
-  dockerfile = "Dockerfile"
+  memory = "2048mb"   # 2GB RAM für Puppeteer + Chromium
+  kernel_args = ["vm.overcommit_memory=1"]
