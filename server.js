@@ -1,8 +1,9 @@
-// 🚗 Fahregut Auto-Crawler – Version 9.5 (Fly.io Stable + WS Heartbeat + Auto-Recovery)
-// Puppeteer-Core + Chromium – 2025 Optimiert & Resilient
+// 🚗 Fahregut Auto-Crawler – Version 9.6 (Fly.io Stable + Chromium Fix + WS Heartbeat)
+// Puppeteer-Core + @sparticuz/chromium – 2025 Optimiert & Resilient
 
 import express from "express";
 import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 import cors from "cors";
 import axios from "axios";
 import http from "http";
@@ -14,7 +15,6 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 const HEALTH_URL = process.env.HEALTH_URL || "https://fahregut-auto-crawler.fly.dev/health";
-const EXEC_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
 
 // 🧠 Speicher
 let seenUrls = new Set();
@@ -47,7 +47,7 @@ function parseKleinanzeigenTime(str) {
   return null;
 }
 
-// 🧭 Browser starten (mit Auto-Recovery)
+// 🧭 Browser starten (mit Auto-Recovery & Sparticuz Chromium)
 async function initBrowser(forceRestart = false) {
   try {
     if (browser && !forceRestart) return;
@@ -56,28 +56,18 @@ async function initBrowser(forceRestart = false) {
       browser = null;
     }
 
-    console.log("🧭 Starte Chromium...");
+    console.log("🧭 Starte Chromium (Fly.io kompatibel)...");
     browser = await puppeteer.launch({
-      args: [
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--disable-setuid-sandbox",
-        "--disable-infobars",
-        "--disable-software-rasterizer",
-        "--disable-extensions",
-        "--window-size=1280,720",
-        "--single-process",
-        "--no-zygote"
-      ],
-      headless: true,
-      executablePath: EXEC_PATH
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
 
     page = await browser.newPage();
     console.log("✅ Chromium erfolgreich gestartet.");
 
-    // Auto-close listener
     browser.on("disconnected", async () => {
       console.warn("⚠️ Chromium wurde unerwartet geschlossen. Neustart in 5s...");
       await new Promise((r) => setTimeout(r, 5000));
@@ -109,7 +99,7 @@ function buildSearchUrl(filters = {}) {
     farbe = "",
     bundesland = "",
     anbieter = "",
-    angebot = ""
+    angebot = "",
   } = filters;
 
   let query = [marke, modell].filter(Boolean).join(" ");
@@ -141,7 +131,6 @@ async function fetchAds(filters = {}) {
   try {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 45000 });
 
-    // Cookies akzeptieren
     try {
       const cookie = await page.$('button[aria-label="Alle akzeptieren"]');
       if (cookie) {
@@ -230,7 +219,7 @@ app.get("/crawl", async (req, res) => {
 
 // 💓 Healthcheck
 app.get("/health", (_, res) =>
-  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.5 – Fly.io Stable ✅)")
+  res.send("✅ Fahregut Auto-Crawler läuft (Version 9.6 – Fly.io Stable ✅)")
 );
 
 // 🔁 Keepalive
@@ -241,7 +230,6 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const clients = new Set();
 
-// 💓 WS Heartbeat
 function heartbeat() {
   this.isAlive = true;
 }
@@ -275,7 +263,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-// 🔄 WS-Ping alle 15s (Fly.io aktiv halten)
+// 💓 WS-Ping alle 15s
 setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
@@ -289,5 +277,5 @@ setInterval(() => updateAds({}), 6000);
 
 // 🚀 Start IPv4 + IPv6
 server.listen(PORT, ["0.0.0.0", "::"], () =>
-  console.log(`🚗 Server läuft auf Port ${PORT} – Version 9.5 Stable ✅`)
+  console.log(`🚗 Server läuft auf Port ${PORT} – Version 9.6 Stable ✅`)
 );
